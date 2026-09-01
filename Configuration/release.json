@@ -1,7 +1,15 @@
 {
   "artifact": {
     "name": "FFmpeg.xcframework.zip",
-    "swiftPackageChecksum": "2e8023345a02026f6372ed0d12c48b4f838bab3baf7541aabece337e2d00ccbd"
+    "swiftPackageChecksum": "f6ca366a0bc4ccb4716e4fade1683c318249c3d53c5f324cb465442230a92f49",
+    "xcframework": {
+      "infoPlistSHA256": "699137b8f423e48da9f5628570ce0927c6d84d68cfd8b8bed13a1f42b27a54db",
+      "slices": {
+        "ios-arm64": "a4b0c460b7070ba780458c1fb49bad334ce842cc6a69bddf00242ac1cd8a4636",
+        "ios-arm64_x86_64-simulator": "686fd616c3241a8b8cb9e4f79ea949482e10ac0cb508c1789d5c53ebdf3a9ee4",
+        "macos-arm64_x86_64": "9b47e79f02262c193a87a2d1162bb85d44c36f930d48dc8b68263ba57c8f115e"
+      }
+    }
   },
   "build": {
     "iOSMinimumVersion": "15.0",
@@ -15,11 +23,25 @@
   },
   "ffmpeg": {
     "releaseKeyFingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8",
+    "releaseKeySHA256": "397b3becedcd5a98769967ff1ff8501ddc89f8368b8f766e4701377d7dbaabe5",
     "sha256": "7f607a00dd0d28a729d5a4811205812eef01cf6ef6155025febb6f36a9062d52",
     "signatureURL": "https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz.asc",
     "url": "https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz",
     "version": "9.0"
   },
   "packageVersion": "1.0.0",
-  "schemaVersion": 1
+  "schemaVersion": 1,
+  "toolchain": {
+    "cctoolsVersion": "Apple Inc. version cctools-1024.3",
+    "clangVersion": "Apple clang version 17.0.0 (clang-1700.0.13.5)",
+    "iPhoneOSSDKVersion": "18.5",
+    "iPhoneSimulatorSDKVersion": "18.5",
+    "macOSSDKVersion": "15.5",
+    "makeVersion": "GNU Make 3.81",
+    "mesonVersion": "1.11.2",
+    "ninjaVersion": "1.13.2",
+    "pkgConfigVersion": "3.0.5",
+    "xcodeBuild": "16F6",
+    "xcodeVersion": "16.4"
+  }
 }

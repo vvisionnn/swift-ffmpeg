@@ -77,20 +77,20 @@ slice and an executable qualification gate exist for it.
   five thin slices, three variants, 515 decoders, 359 demuxers, one `spdif`
   muxer, 33 input protocols, and no private `_SecIdentityCreate` reference.
 - [x] Record the canonical upstream and GitHub Actions security/release model.
-- [>] Commit this plan as the new repository's isolated first checkpoint.
+- [x] Commit this plan as isolated checkpoint `37d91a8`.
 
 ### 2. Local package and reproducible build
 
-- [ ] Add the Swift package manifest, source manifest, patch series, legal
+- [x] Add the Swift package manifest, source manifest, patch series, legal
   materials, support headers, documentation, and ignored build directories.
-- [ ] Add pinned `mise` tools and task wrappers while keeping the invoked shell
+- [x] Add pinned `mise` tools and task wrappers while keeping the invoked shell
   scripts directly runnable for contributors and relinking recipients.
-- [ ] Generalize the existing deterministic builder around explicit
+- [x] Generalize the existing deterministic builder around explicit
   `DEVELOPER_DIR`, source-manifest inputs, isolated download/cache directories,
   and output paths.
-- [ ] Add cheap source/upstream checks plus artifact, configuration, symbol,
+- [>] Add cheap source/upstream checks plus artifact, configuration, symbol,
   platform, module import, package-consumer, and reproducibility gates.
-- [ ] Build and validate the initial XCFramework locally.
+- [x] Build and validate the initial XCFramework locally.
 
 ### 3. Public repository and bootstrap release
 
@@ -134,7 +134,7 @@ release never reuses a published version or asset.
 | Gate | Attempt | Result / next action |
 | --- | ---: | --- |
 | Architecture and plan | 1 | PASS: minimal ownership and immutable release model recorded |
-| Local package | 0 | Not started |
+| Local package | 1 | PASS: signed sources, five-slice build, deterministic ZIP, macOS consumer, and iPhone 16 Simulator gates passed |
 | Bootstrap release | 0 | Not started |
 | Daily upstream release | 0 | Not started |
 | SwiftMediaToolbox integration | 0 | Not started |
@@ -145,3 +145,24 @@ release never reuses a published version or asset.
 Evidence will be appended as each checkbox completes. A checkbox is not done
 without the command, artifact digest, workflow run, test result, or manual
 observation that proves it.
+
+- Architecture plan committed at `37d91a8`; the package façade and legal/docs
+  surface committed at `a044bbf`.
+- `Scripts/fetch-sources.sh` verified FFmpeg 9.0's detached signature with the
+  pinned `FCF986EA15E6E293A5644F10B4322F04D67658D8` key, plus the configured
+  FFmpeg and dav1d SHA-256 digests and archive roots.
+- `Scripts/build-xcframework.sh` rebuilt all five slices with Xcode 16.4
+  (`16F6`), iOS SDK 18.5, and macOS SDK 15.5, then assembled the three expected
+  variants with no private symbol or configuration-policy rejection.
+- `Scripts/validate-artifact.sh` accepted the rebuilt archive hashes:
+  `a4b0c460...a4636` (iOS), `686fd616...9ee4` (Simulator), and
+  `9b47e79f...f115e` (macOS).
+- Two normalized packages matched SwiftPM checksum
+  `f6ca366a...92f49`. Three Swift package smoke tests, a release build, and an
+  external consumer with no linker settings passed on macOS.
+- Simulator attempt 1 rejected the assumed `swift-ffmpeg-Package` scheme;
+  after binding the generated `swift-ffmpeg` scheme, attempt 2 built and ran
+  all three tests on iPhone 16 successfully.
+- `mise` 2026.8.16 installed and locked Python 3.13.15, Meson 1.11.2, Ninja
+  1.13.2, jq 1.8.2, ShellCheck 0.11.0, and actionlint 1.7.12. `mise run doctor`
+  and `mise run lint` pass.

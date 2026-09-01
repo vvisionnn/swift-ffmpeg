@@ -1,0 +1,4 @@
+module FFmpeg [system] {
+    umbrella header "FFmpeg.h"
+    export *
+}

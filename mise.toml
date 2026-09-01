@@ -1,0 +1,82 @@
+[settings]
+lockfile = true
+
+[tools]
+actionlint = "1.7.12"
+jq = "1.8.2"
+meson = "1.11.2"
+ninja = "1.13.2"
+python = "3.13.15"
+shellcheck = "0.11.0"
+
+[tasks.doctor]
+description = "Validate the pinned Apple and native build toolchain"
+run = "./Scripts/check-environment.sh"
+
+[tasks."sources:fetch"]
+description = "Download and verify the configured FFmpeg and dav1d sources"
+run = "./Scripts/fetch-sources.sh"
+
+[tasks."sources:verify"]
+description = "Verify source hashes, FFmpeg signature/key, and archive roots"
+run = "./Scripts/verify-sources.sh"
+
+[tasks.build]
+description = "Build all five thin slices and assemble FFmpeg.xcframework"
+depends = ["doctor", "sources:verify"]
+run = "./Scripts/build-xcframework.sh"
+
+[tasks."artifact:fetch"]
+description = "Fetch the checksum-pinned released XCFramework when absent"
+run = "./Scripts/fetch-artifact.sh"
+
+[tasks.package]
+description = "Create and checksum the deterministic release ZIP"
+depends = ["artifact:fetch"]
+run = "./Scripts/package-xcframework.sh"
+
+[tasks."artifact:verify"]
+description = "Validate slices, symbols, configuration, headers, and manifest"
+depends = ["artifact:fetch"]
+run = "./Scripts/validate-artifact.sh"
+
+[tasks."test:local"]
+description = "Test the package and a linker-setting-free external consumer"
+depends = ["artifact:verify"]
+run = "./Scripts/test-package.sh"
+
+[tasks."test:simulator"]
+description = "Build and run package tests on the newest iOS Simulator runtime"
+depends = ["artifact:verify"]
+run = "./Scripts/test-ios-simulator.sh"
+
+[tasks.reproducibility]
+description = "Build twice independently and require byte-identical releases"
+depends = ["doctor", "sources:verify"]
+run = "./Scripts/check-reproducibility.sh --full"
+
+[tasks."reproducibility:package"]
+description = "Require two normalized ZIPs from one XCFramework to be identical"
+depends = ["artifact:fetch"]
+run = "./Scripts/check-reproducibility.sh --package-only"
+
+[tasks.lint]
+description = "Lint scripts, workflows, manifests, privacy, and tracked inputs"
+run = "./Scripts/lint.sh"
+
+[tasks.check]
+description = "Run the normal local and CI qualification suite"
+depends = [
+  "lint",
+  "sources:verify",
+  "artifact:verify",
+  "test:local",
+  "test:simulator",
+  "reproducibility:package",
+]
+run = "git diff --check"
+
+[tasks.ci]
+description = "Alias for the complete normal qualification suite"
+depends = ["check"]
+run = "git status --short"

@@ -1,0 +1,61 @@
+--- a/libavformat/tls_securetransport.c
++++ b/libavformat/tls_securetransport.c
+@@ -21,1 +21,7 @@
++/*
++ * Modified by swift-ffmpeg on 2026-09-01:
++ * Disable the SecureTransport client-certificate path because its identity
++ * construction depends on the private SecIdentityCreate Apple API.
++ */
++
+-#include <errno.h>
++#include <errno.h>
+@@ -41,2 +47,0 @@
+-// We use a private API call here; it's good enough for WebKit.
+-SecIdentityRef SecIdentityCreate(CFAllocatorRef allocator, SecCertificateRef certificate, SecKeyRef privateKey);
+@@ -153,42 +157,7 @@
+ static int load_cert(URLContext *h)
+ {
+-    TLSContext *c = h->priv_data;
+-    int ret = 0;
+-    CFArrayRef certArray = NULL;
+-    CFArrayRef keyArray = NULL;
+-    SecIdentityRef id = NULL;
+-    CFMutableArrayRef outArray = NULL;
+-
+-    if ((ret = import_pem(h, c->tls_shared.cert_file, &certArray)) < 0)
+-        goto end;
+-
+-    if ((ret = import_pem(h, c->tls_shared.key_file, &keyArray)) < 0)
+-        goto end;
+-
+-    if (!(id = SecIdentityCreate(kCFAllocatorDefault,
+-                                 (SecCertificateRef)CFArrayGetValueAtIndex(certArray, 0),
+-                                 (SecKeyRef)CFArrayGetValueAtIndex(keyArray, 0)))) {
+-        ret = AVERROR_UNKNOWN;
+-        goto end;
+-    }
+-
+-    if (!(outArray = CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, certArray))) {
+-        ret = AVERROR(ENOMEM);
+-        goto end;
+-    }
+-
+-    CFArraySetValueAtIndex(outArray, 0, id);
+-
+-    SSLSetCertificate(c->ssl_context, outArray);
+-
+-end:
+-    if (certArray)
+-        CFRelease(certArray);
+-    if (keyArray)
+-        CFRelease(keyArray);
+-    if (outArray)
+-        CFRelease(outArray);
+-    if (id)
+-        CFRelease(id);
+-    return ret;
++    av_log(h, AV_LOG_ERROR,
++           "SecureTransport client certificates are disabled because their "
++           "PEM identity construction requires a private Apple API\n");
++    return AVERROR(ENOSYS);
+ }
