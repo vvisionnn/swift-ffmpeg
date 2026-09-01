@@ -2,8 +2,7 @@
 
 `swift-ffmpeg` packages a reproducible, security-reviewed FFmpeg XCFramework
 for Swift projects on iOS, iPadOS, and macOS. It intentionally exposes FFmpeg's
-C module without adding a player API. [SwiftMediaToolbox](https://github.com/vvisionnn/swift-media-toolbox)
-builds its testable audio/video playback layers above this package.
+C module without prescribing a player, editor, or media-processing API.
 
 ## Supported platforms
 
@@ -46,9 +45,7 @@ let version = String(cString: av_version_info())
 ```
 
 The `FFmpeg` product carries its Apple framework/system-library link settings
-and privacy manifest. The initial `1.0.0` package contains FFmpeg 9.0 with
-dav1d 1.5.4 and preserves the binary used by SwiftMediaToolbox before this
-package was extracted.
+and privacy manifest. Release `1.0.0` contains FFmpeg 9.0 with dav1d 1.5.4.
 
 Maintainer validation may set `SWIFT_FFMPEG_USE_LOCAL_XCFRAMEWORK=1` to use the
 ignored `Artifacts/FFmpeg.xcframework` path before a release is published.
@@ -80,8 +77,8 @@ mise run check
 
 The daily updater checks FFmpeg's canonical signed release first and performs
 an expensive macOS build only when a new stable version exists. See
-[SWIFT_FFMPEG_PLAN.md](SWIFT_FFMPEG_PLAN.md) for the release invariants and
-[CONTRIBUTING.md](CONTRIBUTING.md) for focused commands.
+[CONTRIBUTING.md](CONTRIBUTING.md) for the release invariants and focused
+commands.
 
 ## Licensing and redistribution
 

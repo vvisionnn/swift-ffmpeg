@@ -2,7 +2,7 @@
 
 Keep this package focused on reproducible FFmpeg binaries. Playback APIs,
 media policy, UI, application authentication, and player-specific C shims
-belong in consuming projects such as SwiftMediaToolbox.
+belong in consuming applications and libraries.
 
 ## Setup and checks
 

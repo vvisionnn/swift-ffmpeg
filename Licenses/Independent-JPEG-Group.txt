@@ -9,9 +9,9 @@ The included files and their upstream copyright notices are:
 - libavcodec/jfdctint_template.c: Copyright (C) 1991-1996, Thomas G. Lane.
 - libavcodec/jrevdct.c: Copyright (C) 1991, 1992, Thomas G. Lane.
 
-The swift-media-toolbox project makes no additions, deletions, or other
-changes to these three files. They are included exactly as supplied in the
-verified FFmpeg 9.0 source archive.
+The swift-ffmpeg package makes no additions, deletions, or other changes to
+these three files. They are included exactly as supplied in the verified
+FFmpeg 9.0 source archive.
 
 All Rights Reserved except as specified below.
 
