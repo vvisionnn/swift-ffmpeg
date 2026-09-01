@@ -59,6 +59,15 @@ description = "Test deterministic release assets and unsafe-archive rejection"
 depends = ["package"]
 run = "./Scripts/test-release-assets.sh"
 
+[tasks."test:release-candidate"]
+description = "Test fail-closed release candidate generation and finalization"
+run = "python3 -I -B -m unittest discover -s Tests/ReleaseCandidateTests -p 'test_*.py' -v"
+
+[tasks."test:remote-release"]
+description = "Test exact-tag remote release validation with a local fixture"
+depends = ["package"]
+run = "./Scripts/test-remote-release.sh"
+
 [tasks."artifact:verify"]
 description = "Validate slices, symbols, configuration, headers, and manifest"
 depends = ["artifact:fetch"]
@@ -96,7 +105,9 @@ depends = [
   "sources:verify",
   "artifact:verify",
   "test:local",
+  "test:release-candidate",
   "test:release-assets",
+  "test:remote-release",
   "test:simulator",
   "reproducibility:package",
 ]
