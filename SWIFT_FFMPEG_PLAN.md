@@ -173,3 +173,7 @@ observation that proves it.
 - Thirty adversarial discovery tests pass, and the canonical FFmpeg download
   page identifies signed stable release 9.0.1 (2026-08-12) as the one update
   over the configured 9.0 baseline.
+- Release-asset generation is byte-reproducible across two runs and produces
+  exactly six explicit assets. The 69-entry corresponding-source/relink kit,
+  SPDX 2.3 SBOM, metrics, release manifest, and checksums all pass structural,
+  inventory, timestamp, mode, digest, and path-traversal validation.

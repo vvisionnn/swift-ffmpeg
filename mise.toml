@@ -44,6 +44,21 @@ description = "Create and checksum the deterministic release ZIP"
 depends = ["artifact:fetch"]
 run = "./Scripts/package-xcframework.sh"
 
+[tasks."release:assets"]
+description = "Prepare the source kit, SBOM, metrics, manifest, and checksums"
+depends = ["package"]
+run = "./Scripts/prepare-release-assets.sh"
+
+[tasks."release:verify"]
+description = "Verify every explicit release and compliance asset"
+depends = ["release:assets"]
+run = "./Scripts/verify-release-assets.sh"
+
+[tasks."test:release-assets"]
+description = "Test deterministic release assets and unsafe-archive rejection"
+depends = ["package"]
+run = "./Scripts/test-release-assets.sh"
+
 [tasks."artifact:verify"]
 description = "Validate slices, symbols, configuration, headers, and manifest"
 depends = ["artifact:fetch"]
@@ -81,6 +96,7 @@ depends = [
   "sources:verify",
   "artifact:verify",
   "test:local",
+  "test:release-assets",
   "test:simulator",
   "reproducibility:package",
 ]
