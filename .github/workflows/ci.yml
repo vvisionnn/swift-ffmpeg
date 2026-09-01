@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - name: Check out the reviewed source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           lfs: false
@@ -89,7 +89,7 @@ jobs:
           printf '%s\n' "$pkgconf_prefix/bin" >>"$GITHUB_PATH"
 
       - name: Install mise
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           cache: false
           install: false
@@ -212,7 +212,7 @@ jobs:
 
       - name: Upload qualification evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/swift-ffmpeg-ci-evidence
