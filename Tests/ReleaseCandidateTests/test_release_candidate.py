@@ -218,18 +218,22 @@ class ReleaseCandidateGenerationTests(unittest.TestCase):
                     base_config(), base_package(), discovery(version), NEW_SOURCE_SHA
                 )
 
-    def test_rejects_non_point_branch_and_skipped_point(self) -> None:
-        for version, message in (
-            ("9.1", "point-release branch"),
-            ("10.0", "point-release branch"),
-            ("9.0.2", "exactly one point release"),
-        ):
+    def test_rejects_non_point_branch(self) -> None:
+        for version in ("9.1", "10.0"):
             with self.subTest(version=version), self.assertRaisesRegex(
-                CandidateError, message
+                CandidateError, "point-release branch"
             ):
                 generate_candidate_documents(
                     base_config(), base_package(), discovery(version), NEW_SOURCE_SHA
                 )
+
+    def test_accepts_a_newer_point_when_daily_checks_missed_a_release(self) -> None:
+        candidate, package = generate_candidate_documents(
+            base_config(), base_package(), discovery("9.0.2"), NEW_SOURCE_SHA
+        )
+        self.assertEqual(candidate["ffmpeg"]["version"], "9.0.2")
+        self.assertEqual(candidate["packageVersion"], "1.0.1")
+        self.assertIn("/1.0.1/FFmpeg.xcframework.zip", package)
 
     def test_rejects_prerelease_and_noncanonical_zero_patch(self) -> None:
         for version in ("9.0-rc1", "9.0.0"):

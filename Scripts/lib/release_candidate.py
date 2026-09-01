@@ -133,7 +133,7 @@ def _upstream_version(value: Any, path: str) -> tuple[int, int, int]:
     )
 
 
-def _next_point_version(current: str, candidate: str, path: str) -> None:
+def _newer_point_version(current: str, candidate: str, path: str) -> None:
     current_tuple = _upstream_version(current, f"{path}.current")
     candidate_tuple = _upstream_version(candidate, f"{path}.candidate")
     if candidate_tuple <= current_tuple:
@@ -144,10 +144,6 @@ def _next_point_version(current: str, candidate: str, path: str) -> None:
         raise CandidateError(
             f"{path} is not an update on the {current_tuple[0]}.{current_tuple[1]} "
             "point-release branch"
-        )
-    if candidate_tuple[2] != current_tuple[2] + 1:
-        raise CandidateError(
-            f"{path} must advance exactly one point release from {current}"
         )
 
 
@@ -365,7 +361,7 @@ def validate_discovery(
         "discovery.release",
     )
     version = _string(release["version"], "discovery.release.version")
-    _next_point_version(configured_version, version, "FFmpeg discovery")
+    _newer_point_version(configured_version, version, "FFmpeg discovery")
     expected_url = f"https://ffmpeg.org/releases/ffmpeg-{version}.tar.xz"
     if release["sourceURL"] != expected_url:
         raise CandidateError("discovery.release.sourceURL is not canonical")
@@ -537,7 +533,7 @@ def advance_capability_oracle(
         raise CandidateError(
             "built capability FFmpeg version does not match the candidate release"
         )
-    _next_point_version(
+    _newer_point_version(
         reviewed_version,
         target_ffmpeg_version,
         "capability oracle",
