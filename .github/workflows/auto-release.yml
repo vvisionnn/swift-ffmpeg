@@ -1,0 +1,918 @@
+name: FFmpeg Auto Release
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: swift-ffmpeg-auto-release
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: Discover stable FFmpeg
+    if: github.repository == 'vvisionnn/swift-ffmpeg' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      configured_version: ${{ steps.release.outputs.configured_version }}
+      release_date: ${{ steps.release.outputs.release_date }}
+      target_version: ${{ steps.release.outputs.target_version }}
+      update_available: ${{ steps.release.outputs.update_available }}
+
+    steps:
+      - name: Check out the trusted release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+          show-progress: false
+          submodules: false
+
+      - name: Test fail-closed discovery
+        run: python3 -I -B -m unittest discover -s Tests/DiscoveryTests -p 'test_*.py' -v
+
+      - name: Query the canonical stable release
+        id: release
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          discovery="$RUNNER_TEMP/ffmpeg-discovery.json"
+          ./Scripts/discover-ffmpeg-release.py >"$discovery"
+          python3 -I -B - "$discovery" "$GITHUB_OUTPUT" <<'PY'
+          import json
+          from pathlib import Path
+          import re
+          import sys
+
+          document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if set(document) != {
+              "configuredVersion", "release", "schemaVersion", "updateAvailable"
+          }:
+              raise SystemExit("discovery output has an unexpected schema")
+          release = document["release"]
+          if set(release) != {"releaseDate", "signatureURL", "sourceURL", "version"}:
+              raise SystemExit("release discovery has an unexpected schema")
+          version_pattern = re.compile(r"[1-9][0-9]*\.(?:0|[1-9][0-9]*)(?:\.[1-9][0-9]*)?\Z")
+          for value in (document["configuredVersion"], release["version"]):
+              if not isinstance(value, str) or version_pattern.fullmatch(value) is None:
+                  raise SystemExit("discovery returned a non-canonical version")
+          update = document["updateAvailable"]
+          if not isinstance(update, bool):
+              raise SystemExit("updateAvailable must be Boolean")
+          fields = {
+              "configured_version": document["configuredVersion"],
+              "release_date": release["releaseDate"],
+              "target_version": release["version"],
+              "update_available": str(update).lower(),
+          }
+          with Path(sys.argv[2]).open("a", encoding="utf-8") as stream:
+              for key, value in fields.items():
+                  if "\n" in value or "\r" in value:
+                      raise SystemExit("discovery output contains a line break")
+                  stream.write(f"{key}={value}\n")
+          PY
+
+      - name: Report a current package
+        if: steps.release.outputs.update_available != 'true'
+        run: echo "The package already tracks FFmpeg ${{ steps.release.outputs.target_version }}."
+
+  build:
+    name: Build and qualify release candidate
+    needs: discover
+    if: needs.discover.outputs.update_available == 'true'
+    runs-on: macos-15
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      FFMPEG_BUILD_JOBS: "8"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      MISE_LOCKED: "1"
+      MISE_YES: "1"
+    outputs:
+      artifact_checksum: ${{ steps.stage.outputs.artifact_checksum }}
+      ffmpeg_version: ${{ steps.stage.outputs.ffmpeg_version }}
+      package_version: ${{ steps.stage.outputs.package_version }}
+      payload_name: ${{ steps.stage.outputs.payload_name }}
+      source_sha256: ${{ steps.candidate.outputs.source_sha256 }}
+
+    steps:
+      - name: Check out the trusted release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+          show-progress: false
+          submodules: false
+
+      - name: Select the exact Apple toolchain
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          test -d "$DEVELOPER_DIR"
+          test "$(xcodebuild -version)" = $'Xcode 16.4\nBuild version 16F6'
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "18.5"
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "18.5"
+          test "$(xcrun --sdk macosx --show-sdk-version)" = "15.5"
+
+      - name: Provision signature and pkg-config tools
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          gpg_output="$(gpg --version)"
+          case "${gpg_output%%$'\n'*}" in
+            "gpg (GnuPG) 2."*) ;;
+            *) exit 1 ;;
+          esac
+
+          pkgconf_version="3.0.5"
+          pkgconf_sha256="3acd3a8a3cce65a8d620321855d92fb602e026cbe8e13ee36bdec58483b59ace"
+          pkgconf_archive="$RUNNER_TEMP/pkgconf-${pkgconf_version}.tar.xz"
+          pkgconf_source="$RUNNER_TEMP/pkgconf-${pkgconf_version}"
+          pkgconf_prefix="$RUNNER_TEMP/pkgconf-${pkgconf_version}-prefix"
+
+          curl \
+            --fail \
+            --location \
+            --proto '=https' \
+            --proto-redir '=https' \
+            --retry 3 \
+            --retry-all-errors \
+            --show-error \
+            --silent \
+            --output "$pkgconf_archive" \
+            "https://distfiles.ariadne.space/pkgconf/pkgconf-${pkgconf_version}.tar.xz"
+          test "$(shasum -a 256 "$pkgconf_archive" | awk '{print $1}')" = "$pkgconf_sha256"
+          tar -xf "$pkgconf_archive" -C "$RUNNER_TEMP"
+          test -d "$pkgconf_source"
+          (
+            cd "$pkgconf_source"
+            ./configure \
+              --disable-dependency-tracking \
+              --disable-silent-rules \
+              --prefix="$pkgconf_prefix"
+            make -j2
+            make install
+          )
+          ln -s pkgconf "$pkgconf_prefix/bin/pkg-config"
+          test "$("$pkgconf_prefix/bin/pkg-config" --version)" = "$pkgconf_version"
+          printf '%s\n' "$pkgconf_prefix/bin" >>"$GITHUB_PATH"
+
+      - name: Install mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          cache: false
+          install: false
+          version: 2026.8.16
+
+      - name: Install locked developer tools
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise install --locked
+          mise ls --current
+
+      - name: Create the authenticated candidate configuration
+        id: candidate
+        env:
+          CONFIGURED_VERSION: ${{ needs.discover.outputs.configured_version }}
+          RELEASE_DATE: ${{ needs.discover.outputs.release_date }}
+          TARGET_VERSION: ${{ needs.discover.outputs.target_version }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          candidate_root="$RUNNER_TEMP/swift-ffmpeg/candidate"
+          source_root="$RUNNER_TEMP/swift-ffmpeg/sources"
+          mkdir -p "$candidate_root" "$source_root" .cache/sources
+
+          discovery="$candidate_root/discovery.json"
+          python3 -I -B - "$discovery" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["TARGET_VERSION"]
+          document = {
+              "configuredVersion": os.environ["CONFIGURED_VERSION"],
+              "release": {
+                  "releaseDate": os.environ["RELEASE_DATE"],
+                  "signatureURL": f"https://ffmpeg.org/releases/ffmpeg-{version}.tar.xz.asc",
+                  "sourceURL": f"https://ffmpeg.org/releases/ffmpeg-{version}.tar.xz",
+                  "version": version,
+              },
+              "schemaVersion": 1,
+              "updateAvailable": True,
+          }
+          Path(os.sys.argv[1]).write_text(
+              json.dumps(document, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          source_archive="$source_root/ffmpeg-${TARGET_VERSION}.tar.xz"
+          signature="$source_archive.asc"
+          curl --disable --fail-with-body --location \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --retry 3 --retry-all-errors --max-filesize 536870912 \
+            --output "$source_archive" \
+            "https://ffmpeg.org/releases/ffmpeg-${TARGET_VERSION}.tar.xz"
+          curl --disable --fail-with-body --location \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --retry 3 --retry-all-errors --max-filesize 1048576 \
+            --output "$signature" \
+            "https://ffmpeg.org/releases/ffmpeg-${TARGET_VERSION}.tar.xz.asc"
+          source_sha256="$(shasum -a 256 "$source_archive" | awk '{print $1}')"
+          [[ "$source_sha256" =~ ^[0-9a-f]{64}$ ]]
+          printf 'source_sha256=%s\n' "$source_sha256" >>"$GITHUB_OUTPUT"
+
+          ./Scripts/generate-release-candidate.py \
+            --base-config "$GITHUB_WORKSPACE/Configuration/release.json" \
+            --base-package "$GITHUB_WORKSPACE/Package.swift" \
+            --discovery "$discovery" \
+            --ffmpeg-source-sha256 "$source_sha256" \
+            --output-config "$candidate_root/release.placeholder.json" \
+            --output-package "$candidate_root/Package.placeholder.swift"
+
+          cp "$candidate_root/release.placeholder.json" Configuration/release.json
+          cp "$candidate_root/Package.placeholder.swift" Package.swift
+          cp "$source_archive" ".cache/sources/ffmpeg-${TARGET_VERSION}.tar.xz"
+          cp "$signature" ".cache/sources/ffmpeg-${TARGET_VERSION}.tar.xz.asc"
+
+      - name: Authenticate all configured source archives
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run sources:fetch
+          mise run sources:verify
+
+      - name: Build all five slices
+        run: mise run build
+
+      - name: Collect and gate the candidate capabilities
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          candidate_root="$RUNNER_TEMP/swift-ffmpeg/candidate"
+          ./Scripts/check-capabilities.py \
+            --release-config "$GITHUB_WORKSPACE/Configuration/release.json" \
+            --xcframework "$GITHUB_WORKSPACE/Artifacts/FFmpeg.xcframework" \
+            --emit-manifest >"$candidate_root/capabilities.built.json"
+
+      - name: Finalize checksums from the deterministic binary
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          candidate_root="$RUNNER_TEMP/swift-ffmpeg/candidate"
+          bootstrap_root="$candidate_root/bootstrap"
+          staged_framework="$bootstrap_root/FFmpeg.xcframework"
+          bootstrap_zip="$candidate_root/FFmpeg.xcframework.zip"
+          source_date_epoch="$(jq -er '.build.sourceDateEpoch' Configuration/release.json)"
+          archive_timestamp="$(TZ=UTC date -r "$source_date_epoch" '+%Y%m%d%H%M.%S')"
+
+          mkdir -p "$bootstrap_root"
+          COPYFILE_DISABLE=1 ditto Artifacts/FFmpeg.xcframework "$staged_framework"
+          xattr -cr "$staged_framework"
+          find "$staged_framework" -type d -exec chmod 0755 {} +
+          find "$staged_framework" -type f -exec chmod 0644 {} +
+          find "$staged_framework" -exec touch -h -t "$archive_timestamp" {} +
+          (
+            cd "$bootstrap_root"
+            find FFmpeg.xcframework -print | LC_ALL=C sort | \
+              COPYFILE_DISABLE=1 zip -X -q "$bootstrap_zip" -@
+          )
+
+          ./Scripts/finalize-release-candidate.py \
+            --candidate-config "$candidate_root/release.placeholder.json" \
+            --candidate-package "$candidate_root/Package.placeholder.swift" \
+            --xcframework "$GITHUB_WORKSPACE/Artifacts/FFmpeg.xcframework" \
+            --release-zip "$bootstrap_zip" \
+            --capability-oracle "$GITHUB_WORKSPACE/Configuration/capabilities.json" \
+            --built-capabilities "$candidate_root/capabilities.built.json" \
+            --output-config "$candidate_root/release.final.json" \
+            --output-package "$candidate_root/Package.final.swift" \
+            --output-capability-oracle "$candidate_root/capabilities.final.json"
+
+          cp "$candidate_root/release.final.json" Configuration/release.json
+          cp "$candidate_root/Package.final.swift" Package.swift
+          cp "$candidate_root/capabilities.final.json" Configuration/capabilities.json
+          git diff --check
+          test "$(git diff --name-only | LC_ALL=C sort)" = \
+            $'Configuration/capabilities.json\nConfiguration/release.json\nPackage.swift'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- Configuration/capabilities.json Configuration/release.json Package.swift
+          git commit -m "build(release): package FFmpeg $(jq -er '.ffmpeg.version' Configuration/release.json)"
+
+      - name: Validate repository and candidate tooling
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run lint
+          mise run doctor
+          mise run test:discovery
+          mise run test:release-candidate
+
+      - name: Verify artifact and reviewed capabilities
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run artifact:verify
+          ./Scripts/test-capabilities.sh
+
+      - name: Prove two independent full builds are reproducible
+        run: mise run reproducibility
+
+      - name: Package and recheck deterministic output
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run package
+          mise run reproducibility:package
+
+      - name: Test Swift package and macOS consumer
+        run: mise run test:local
+
+      - name: Build for iOS device and test on Simulator
+        run: mise run test:simulator
+
+      - name: Qualify all release and compliance assets
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run test:release-assets
+          mise run release:verify
+
+      - name: Prove the exact release through a clean local consumer
+        run: ./Scripts/test-remote-release.sh --full
+
+      - name: Stage a closed publication payload
+        id: stage
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          payload_root="$RUNNER_TEMP/swift-ffmpeg/publish"
+          mkdir -p "$payload_root"
+          package_version="$(jq -er '.packageVersion' Configuration/release.json)"
+          ffmpeg_version="$(jq -er '.ffmpeg.version' Configuration/release.json)"
+          artifact_checksum="$(jq -er '.artifact.swiftPackageChecksum' Configuration/release.json)"
+          source_kit="swift-ffmpeg-${package_version}-source-kit.zip"
+          sbom="swift-ffmpeg-${package_version}.spdx.json"
+
+          cp Configuration/release.json "$payload_root/candidate-Configuration-release.json"
+          cp Package.swift "$payload_root/candidate-Package.swift"
+          cp Configuration/capabilities.json \
+            "$payload_root/candidate-Configuration-capabilities.json"
+          for asset in \
+            FFmpeg.xcframework.zip \
+            "$source_kit" \
+            "$sbom" \
+            release-metrics.json \
+            release-manifest.json \
+            SHA256SUMS
+          do
+            cp ".artifacts/release/$asset" "$payload_root/$asset"
+          done
+
+          PAYLOAD_ROOT="$payload_root" \
+          PACKAGE_VERSION="$package_version" \
+          FFMPEG_VERSION="$ffmpeg_version" \
+          ARTIFACT_CHECKSUM="$artifact_checksum" \
+          BASE_COMMIT="$GITHUB_SHA" \
+            python3 -I -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import stat
+
+          root = Path(os.environ["PAYLOAD_ROOT"])
+          package_version = os.environ["PACKAGE_VERSION"]
+          candidate_names = [
+              "candidate-Configuration-capabilities.json",
+              "candidate-Configuration-release.json",
+              "candidate-Package.swift",
+          ]
+          release_names = [
+              "FFmpeg.xcframework.zip",
+              "SHA256SUMS",
+              "release-manifest.json",
+              "release-metrics.json",
+              f"swift-ffmpeg-{package_version}-source-kit.zip",
+              f"swift-ffmpeg-{package_version}.spdx.json",
+          ]
+
+          def record(name: str) -> dict[str, object]:
+              path = root / name
+              metadata = path.lstat()
+              if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+                  raise SystemExit(f"payload input is not a regular file: {name}")
+              return {
+                  "name": name,
+                  "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                  "size": metadata.st_size,
+              }
+
+          document = {
+              "artifactChecksum": os.environ["ARTIFACT_CHECKSUM"],
+              "baseCommit": os.environ["BASE_COMMIT"],
+              "candidateFiles": [record(name) for name in candidate_names],
+              "ffmpegVersion": os.environ["FFMPEG_VERSION"],
+              "packageVersion": package_version,
+              "releaseAssets": [record(name) for name in release_names],
+              "schemaVersion": 1,
+          }
+          (root / "payload-manifest.json").write_text(
+              json.dumps(document, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          actual = sorted(path.name for path in root.iterdir())
+          expected = sorted(candidate_names + release_names + ["payload-manifest.json"])
+          if actual != expected:
+              raise SystemExit("publication payload contains unexpected files")
+          PY
+
+          payload_name="release-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          {
+            printf 'artifact_checksum=%s\n' "$artifact_checksum"
+            printf 'ffmpeg_version=%s\n' "$ffmpeg_version"
+            printf 'package_version=%s\n' "$package_version"
+            printf 'payload_name=%s\n' "$payload_name"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Upload the explicit publication payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.stage.outputs.payload_name }}
+          path: |
+            ${{ runner.temp }}/swift-ffmpeg/publish/candidate-Configuration-capabilities.json
+            ${{ runner.temp }}/swift-ffmpeg/publish/candidate-Configuration-release.json
+            ${{ runner.temp }}/swift-ffmpeg/publish/candidate-Package.swift
+            ${{ runner.temp }}/swift-ffmpeg/publish/FFmpeg.xcframework.zip
+            ${{ runner.temp }}/swift-ffmpeg/publish/SHA256SUMS
+            ${{ runner.temp }}/swift-ffmpeg/publish/release-manifest.json
+            ${{ runner.temp }}/swift-ffmpeg/publish/release-metrics.json
+            ${{ runner.temp }}/swift-ffmpeg/publish/swift-ffmpeg-${{ steps.stage.outputs.package_version }}-source-kit.zip
+            ${{ runner.temp }}/swift-ffmpeg/publish/swift-ffmpeg-${{ steps.stage.outputs.package_version }}.spdx.json
+            ${{ runner.temp }}/swift-ffmpeg/publish/payload-manifest.json
+          compression-level: 0
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 2
+
+  publish:
+    name: Publish immutable release
+    needs: [discover, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    outputs:
+      candidate_branch: ${{ steps.commit.outputs.candidate_branch }}
+      candidate_commit: ${{ steps.commit.outputs.candidate_commit }}
+      release_url: ${{ steps.release.outputs.release_url }}
+      tag: ${{ steps.commit.outputs.tag }}
+
+    steps:
+      - name: Check out only trusted repository code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: true
+          ref: ${{ github.sha }}
+          show-progress: false
+          submodules: false
+
+      - name: Download the closed candidate payload as data
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.payload_name }}
+          path: ${{ runner.temp }}/swift-ffmpeg/publish-input
+
+      - name: Validate every payload byte without extracting release archives
+        env:
+          EXPECTED_ARTIFACT_CHECKSUM: ${{ needs.build.outputs.artifact_checksum }}
+          EXPECTED_BASE_COMMIT: ${{ github.sha }}
+          EXPECTED_FFMPEG_VERSION: ${{ needs.build.outputs.ffmpeg_version }}
+          EXPECTED_PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+          EXPECTED_RELEASE_DATE: ${{ needs.discover.outputs.release_date }}
+          EXPECTED_SOURCE_SHA256: ${{ needs.build.outputs.source_sha256 }}
+          PAYLOAD_ROOT: ${{ runner.temp }}/swift-ffmpeg/publish-input
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          python3 -I -B - <<'PY'
+          import copy
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import stat
+          import sys
+
+          root = Path(os.environ["PAYLOAD_ROOT"])
+          workspace = Path(os.environ["GITHUB_WORKSPACE"])
+          sys.path.insert(0, str(workspace / "Scripts"))
+          from lib.release_candidate import (  # noqa: E402
+              PLACEHOLDER_SHA256,
+              _updated_package_manifest,
+              advance_capability_oracle,
+              generate_candidate_documents,
+              parse_json_bytes,
+              validate_capability_manifest,
+              validate_release_config,
+          )
+
+          expected_package = os.environ["EXPECTED_PACKAGE_VERSION"]
+          candidate_names = [
+              "candidate-Configuration-capabilities.json",
+              "candidate-Configuration-release.json",
+              "candidate-Package.swift",
+          ]
+          release_names = [
+              "FFmpeg.xcframework.zip",
+              "SHA256SUMS",
+              "release-manifest.json",
+              "release-metrics.json",
+              f"swift-ffmpeg-{expected_package}-source-kit.zip",
+              f"swift-ffmpeg-{expected_package}.spdx.json",
+          ]
+          expected_names = sorted(candidate_names + release_names + ["payload-manifest.json"])
+          if not root.is_dir() or root.is_symlink():
+              raise SystemExit("payload root is not a regular directory")
+          actual_names = sorted(path.name for path in root.iterdir())
+          if actual_names != expected_names:
+              raise SystemExit("payload has missing or unexpected top-level entries")
+
+          for name in actual_names:
+              metadata = (root / name).lstat()
+              if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+                  raise SystemExit(f"payload entry is not a regular file: {name}")
+              limit = 1_073_741_824 if name.endswith(".zip") else 268_435_456
+              if metadata.st_size <= 0 or metadata.st_size > limit:
+                  raise SystemExit(f"payload entry size is unsafe: {name}")
+
+          payload = parse_json_bytes(
+              (root / "payload-manifest.json").read_bytes(), "payload manifest"
+          )
+          if set(payload) != {
+              "artifactChecksum", "baseCommit", "candidateFiles", "ffmpegVersion",
+              "packageVersion", "releaseAssets", "schemaVersion"
+          } or payload["schemaVersion"] != 1:
+              raise SystemExit("payload manifest schema mismatch")
+          scalar_expectations = {
+              "artifactChecksum": os.environ["EXPECTED_ARTIFACT_CHECKSUM"],
+              "baseCommit": os.environ["EXPECTED_BASE_COMMIT"],
+              "ffmpegVersion": os.environ["EXPECTED_FFMPEG_VERSION"],
+              "packageVersion": expected_package,
+          }
+          for key, value in scalar_expectations.items():
+              if payload.get(key) != value:
+                  raise SystemExit(f"payload manifest {key} mismatch")
+
+          def verify_records(records: object, expected: list[str]) -> dict[str, dict]:
+              if not isinstance(records, list) or len(records) != len(expected):
+                  raise SystemExit("payload record count mismatch")
+              result = {}
+              for record in records:
+                  if not isinstance(record, dict) or set(record) != {"name", "sha256", "size"}:
+                      raise SystemExit("payload record schema mismatch")
+                  name = record["name"]
+                  if name in result or name not in expected:
+                      raise SystemExit("payload record name mismatch")
+                  path = root / name
+                  digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                  if record["sha256"] != digest or record["size"] != path.stat().st_size:
+                      raise SystemExit(f"payload record digest or size mismatch: {name}")
+                  result[name] = record
+              if list(result) != expected:
+                  raise SystemExit("payload records are not in canonical order")
+              return result
+
+          candidate_records = verify_records(payload["candidateFiles"], candidate_names)
+          release_records = verify_records(payload["releaseAssets"], release_names)
+          config = parse_json_bytes(
+              (root / "candidate-Configuration-release.json").read_bytes(),
+              "candidate release configuration",
+          )
+          package_version, ffmpeg_version = validate_release_config(
+              config, expected_artifacts="final"
+          )
+          if package_version != expected_package or ffmpeg_version != os.environ["EXPECTED_FFMPEG_VERSION"]:
+              raise SystemExit("candidate versions do not match the qualified build")
+          if config["artifact"]["swiftPackageChecksum"] != release_records["FFmpeg.xcframework.zip"]["sha256"]:
+              raise SystemExit("candidate binary checksum does not match the payload")
+          if config["artifact"]["swiftPackageChecksum"] != os.environ["EXPECTED_ARTIFACT_CHECKSUM"]:
+              raise SystemExit("candidate binary checksum does not match the job output")
+          if config["ffmpeg"]["sha256"] != os.environ["EXPECTED_SOURCE_SHA256"]:
+              raise SystemExit("candidate FFmpeg source checksum does not match pre-build discovery")
+
+          base_config = parse_json_bytes(
+              (workspace / "Configuration/release.json").read_bytes(),
+              "trusted base release configuration",
+          )
+          base_package = (workspace / "Package.swift").read_text(encoding="utf-8")
+          target_version = os.environ["EXPECTED_FFMPEG_VERSION"]
+          discovery = {
+              "configuredVersion": base_config["ffmpeg"]["version"],
+              "release": {
+                  "releaseDate": os.environ["EXPECTED_RELEASE_DATE"],
+                  "signatureURL": f"https://ffmpeg.org/releases/ffmpeg-{target_version}.tar.xz.asc",
+                  "sourceURL": f"https://ffmpeg.org/releases/ffmpeg-{target_version}.tar.xz",
+                  "version": target_version,
+              },
+              "schemaVersion": 1,
+              "updateAvailable": True,
+          }
+          expected_config, expected_package_placeholder = generate_candidate_documents(
+              base_config,
+              base_package,
+              discovery,
+              os.environ["EXPECTED_SOURCE_SHA256"],
+          )
+          normalized_config = copy.deepcopy(config)
+          normalized_config["artifact"]["swiftPackageChecksum"] = PLACEHOLDER_SHA256
+          normalized_config["artifact"]["xcframework"]["infoPlistSHA256"] = PLACEHOLDER_SHA256
+          for slice_name in (
+              "ios-arm64",
+              "ios-arm64_x86_64-simulator",
+              "macos-arm64_x86_64",
+          ):
+              normalized_config["artifact"]["xcframework"]["slices"][slice_name] = PLACEHOLDER_SHA256
+          if normalized_config != expected_config:
+              raise SystemExit("candidate configuration changes fields outside the release transition")
+          expected_package = _updated_package_manifest(
+              expected_package_placeholder,
+              expected_version=package_version,
+              expected_checksum=PLACEHOLDER_SHA256,
+              new_version=package_version,
+              new_checksum=config["artifact"]["swiftPackageChecksum"],
+          )
+          actual_package = (root / "candidate-Package.swift").read_text(encoding="utf-8")
+          if actual_package != expected_package:
+              raise SystemExit("candidate Package.swift contains changes outside URL and checksum")
+
+          capabilities = parse_json_bytes(
+              (root / "candidate-Configuration-capabilities.json").read_bytes(),
+              "candidate capabilities",
+          )
+          if validate_capability_manifest(capabilities) != ffmpeg_version:
+              raise SystemExit("candidate capability version mismatch")
+          base_capabilities = parse_json_bytes(
+              (workspace / "Configuration/capabilities.json").read_bytes(),
+              "trusted base capabilities",
+          )
+          expected_capabilities = advance_capability_oracle(
+              base_capabilities, capabilities, target_version
+          )
+          if capabilities != expected_capabilities:
+              raise SystemExit("candidate capability names changed and require explicit review")
+
+          release_manifest = parse_json_bytes(
+              (root / "release-manifest.json").read_bytes(), "release asset manifest"
+          )
+          if release_manifest.get("packageVersion") != package_version or release_manifest.get("releaseTag") != package_version:
+              raise SystemExit("release asset manifest version mismatch")
+          if release_manifest.get("upstream", {}).get("ffmpeg") != ffmpeg_version:
+              raise SystemExit("release asset manifest FFmpeg version mismatch")
+
+          checksummed = [
+              name for name in release_names if name != "SHA256SUMS"
+          ]
+          expected_lines = [
+              f"{release_records[name]['sha256']}  {name}" for name in checksummed
+          ]
+          actual_lines = (root / "SHA256SUMS").read_text(encoding="ascii").splitlines()
+          if actual_lines != expected_lines:
+              raise SystemExit("SHA256SUMS does not exactly cover release assets")
+          if not candidate_records:
+              raise SystemExit("candidate records unexpectedly empty")
+          PY
+
+          ./Scripts/lib/remote_release_verifier.py inspect-manifest \
+            --manifest "$PAYLOAD_ROOT/candidate-Package.swift" \
+            --tag "$EXPECTED_PACKAGE_VERSION" \
+            --expected-checksum "$EXPECTED_ARTIFACT_CHECKSUM" >/dev/null
+
+      - name: Create and push the isolated candidate commit
+        id: commit
+        env:
+          FFMPEG_VERSION: ${{ needs.build.outputs.ffmpeg_version }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+          PAYLOAD_ROOT: ${{ runner.temp }}/swift-ffmpeg/publish-input
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --short)"
+          cp "$PAYLOAD_ROOT/candidate-Configuration-release.json" Configuration/release.json
+          cp "$PAYLOAD_ROOT/candidate-Configuration-capabilities.json" Configuration/capabilities.json
+          cp "$PAYLOAD_ROOT/candidate-Package.swift" Package.swift
+          git diff --check
+          test "$(git diff --name-only | LC_ALL=C sort)" = \
+            $'Configuration/capabilities.json\nConfiguration/release.json\nPackage.swift'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- Configuration/capabilities.json Configuration/release.json Package.swift
+          test "$(git diff --cached --name-only | LC_ALL=C sort)" = \
+            $'Configuration/capabilities.json\nConfiguration/release.json\nPackage.swift'
+          git commit -m "build(release): package FFmpeg $FFMPEG_VERSION"
+          candidate_commit="$(git rev-parse HEAD)"
+          candidate_branch="automation/release-${PACKAGE_VERSION}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git push origin "$candidate_commit:refs/heads/$candidate_branch"
+          {
+            printf 'candidate_branch=%s\n' "$candidate_branch"
+            printf 'candidate_commit=%s\n' "$candidate_commit"
+            printf 'tag=%s\n' "$PACKAGE_VERSION"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Create a draft with six explicit release assets
+        env:
+          CANDIDATE_COMMIT: ${{ steps.commit.outputs.candidate_commit }}
+          FFMPEG_VERSION: ${{ needs.build.outputs.ffmpeg_version }}
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+          PAYLOAD_ROOT: ${{ runner.temp }}/swift-ffmpeg/publish-input
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          tag_status=0
+          git ls-remote --exit-code --tags origin "refs/tags/$PACKAGE_VERSION" >/dev/null || tag_status=$?
+          test "$tag_status" = "2"
+
+          notes="$RUNNER_TEMP/swift-ffmpeg-release-notes.md"
+          {
+            printf 'Automated swift-ffmpeg %s release.\n\n' "$PACKAGE_VERSION"
+            printf -- '- FFmpeg: %s\n' "$FFMPEG_VERSION"
+            printf -- '- Platforms: iOS 15+ and macOS 12+\n'
+            printf -- '- Qualification: reproducible five-slice build, capability oracle, SwiftPM, iOS Simulator, and clean-consumer tests\n'
+            printf '\nChecksums, SPDX SBOM, metrics, and corresponding-source/relinking kit are attached.\n'
+          } >"$notes"
+
+          source_kit="$PAYLOAD_ROOT/swift-ffmpeg-${PACKAGE_VERSION}-source-kit.zip"
+          sbom="$PAYLOAD_ROOT/swift-ffmpeg-${PACKAGE_VERSION}.spdx.json"
+          gh release create "$PACKAGE_VERSION" \
+            "$PAYLOAD_ROOT/FFmpeg.xcframework.zip" \
+            "$PAYLOAD_ROOT/SHA256SUMS" \
+            "$PAYLOAD_ROOT/release-manifest.json" \
+            "$PAYLOAD_ROOT/release-metrics.json" \
+            "$source_kit" \
+            "$sbom" \
+            --draft \
+            --latest=false \
+            --notes-file "$notes" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$CANDIDATE_COMMIT" \
+            --title "swift-ffmpeg $PACKAGE_VERSION"
+
+      - name: Verify the exact draft assets
+        env:
+          CANDIDATE_COMMIT: ${{ steps.commit.outputs.candidate_commit }}
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+          PAYLOAD_ROOT: ${{ runner.temp }}/swift-ffmpeg/publish-input
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          release_json="$RUNNER_TEMP/draft-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$PACKAGE_VERSION" >"$release_json"
+          python3 -I -B - "$release_json" "$PAYLOAD_ROOT/payload-manifest.json" \
+            "$PACKAGE_VERSION" "$CANDIDATE_COMMIT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          release = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          if release.get("tag_name") != sys.argv[3] or release.get("target_commitish") != sys.argv[4]:
+              raise SystemExit("draft release target mismatch")
+          if release.get("draft") is not True or release.get("prerelease") is not False:
+              raise SystemExit("release was not created as a stable draft")
+          expected = {record["name"]: record for record in payload["releaseAssets"]}
+          observed = {}
+          for asset in release.get("assets", []):
+              name = asset.get("name")
+              if name in observed:
+                  raise SystemExit("draft contains duplicate assets")
+              observed[name] = asset
+          if set(observed) != set(expected):
+              raise SystemExit("draft release asset set mismatch")
+          for name, record in expected.items():
+              asset = observed[name]
+              if asset.get("size") != record["size"]:
+                  raise SystemExit(f"draft release asset size mismatch: {name}")
+              if asset.get("digest") != f"sha256:{record['sha256']}":
+                  raise SystemExit(f"draft release asset digest mismatch: {name}")
+          PY
+          test "$(git ls-remote origin "refs/tags/$PACKAGE_VERSION" | awk '{print $1}')" = \
+            "$CANDIDATE_COMMIT"
+
+      - name: Attest all release assets
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/swift-ffmpeg/publish-input/FFmpeg.xcframework.zip
+            ${{ runner.temp }}/swift-ffmpeg/publish-input/SHA256SUMS
+            ${{ runner.temp }}/swift-ffmpeg/publish-input/release-manifest.json
+            ${{ runner.temp }}/swift-ffmpeg/publish-input/release-metrics.json
+            ${{ runner.temp }}/swift-ffmpeg/publish-input/swift-ffmpeg-${{ needs.build.outputs.package_version }}-source-kit.zip
+            ${{ runner.temp }}/swift-ffmpeg/publish-input/swift-ffmpeg-${{ needs.build.outputs.package_version }}.spdx.json
+
+      - name: Publish and require immutability
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          gh release edit "$PACKAGE_VERSION" \
+            --draft=false \
+            --latest \
+            --repo "$GITHUB_REPOSITORY"
+          release_json="$RUNNER_TEMP/published-release.json"
+          immutable="false"
+          for _ in 1 2 3 4 5; do
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$PACKAGE_VERSION" >"$release_json"
+            immutable="$(jq -r '.immutable // false' "$release_json")"
+            [[ "$immutable" == "true" ]] && break
+            sleep 3
+          done
+          test "$immutable" = "true"
+          jq -e '.draft == false and .prerelease == false' "$release_json" >/dev/null
+          release_url="$(jq -er '.html_url' "$release_json")"
+          printf 'release_url=%s\n' "$release_url" >>"$GITHUB_OUTPUT"
+
+  remote-smoke:
+    name: Verify public release consumers
+    needs: [build, publish]
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+
+    steps:
+      - name: Check out trusted verification code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          show-progress: false
+          submodules: false
+
+      - name: Select the exact Apple toolchain
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          test "$(xcodebuild -version)" = $'Xcode 16.4\nBuild version 16F6'
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "18.5"
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "18.5"
+          test "$(xcrun --sdk macosx --show-sdk-version)" = "15.5"
+
+      - name: Resolve, link, run, and test the public package
+        env:
+          ARTIFACT_CHECKSUM: ${{ needs.build.outputs.artifact_checksum }}
+          FFMPEG_VERSION: ${{ needs.build.outputs.ffmpeg_version }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          ./Scripts/verify-remote-release.sh \
+            --tag "$PACKAGE_VERSION" \
+            --expected-ffmpeg-version "$FFMPEG_VERSION" \
+            --expected-checksum "$ARTIFACT_CHECKSUM"
+
+  finalize:
+    name: Fast-forward main after public smoke
+    needs: [build, publish, remote-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Revalidate release and fast-forward main
+        env:
+          CANDIDATE_BRANCH: ${{ needs.publish.outputs.candidate_branch }}
+          CANDIDATE_COMMIT: ${{ needs.publish.outputs.candidate_commit }}
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.publish.outputs.tag }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = \
+            "$GITHUB_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$CANDIDATE_BRANCH" --jq '.object.sha')" = \
+            "$CANDIDATE_COMMIT"
+          release_json="$RUNNER_TEMP/final-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$PACKAGE_VERSION" >"$release_json"
+          jq -e \
+            --arg target "$CANDIDATE_COMMIT" \
+            '.draft == false and .prerelease == false and .immutable == true and .target_commitish == $target' \
+            "$release_json" >/dev/null
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$PACKAGE_VERSION" --jq '.object.sha')" = \
+            "$CANDIDATE_COMMIT"
+
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/git/refs/heads/main" \
+            -f sha="$CANDIDATE_COMMIT" \
+            -F force=false >/dev/null
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = \
+            "$CANDIDATE_COMMIT"
+          gh api --method DELETE \
+            "repos/$GITHUB_REPOSITORY/git/refs/heads/$CANDIDATE_BRANCH"
+          echo "Main now tracks swift-ffmpeg $PACKAGE_VERSION after public smoke validation."
