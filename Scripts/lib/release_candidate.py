@@ -133,18 +133,18 @@ def _upstream_version(value: Any, path: str) -> tuple[int, int, int]:
     )
 
 
-def _newer_point_version(current: str, candidate: str, path: str) -> None:
+def _upstream_update_kind(current: str, candidate: str, path: str) -> str:
     current_tuple = _upstream_version(current, f"{path}.current")
     candidate_tuple = _upstream_version(candidate, f"{path}.candidate")
     if candidate_tuple <= current_tuple:
         raise CandidateError(
             f"{path} would roll back or repeat {current} with {candidate}"
         )
-    if candidate_tuple[:2] != current_tuple[:2]:
-        raise CandidateError(
-            f"{path} is not an update on the {current_tuple[0]}.{current_tuple[1]} "
-            "point-release branch"
-        )
+    if candidate_tuple[0] != current_tuple[0]:
+        return "major"
+    if candidate_tuple[1] != current_tuple[1]:
+        return "minor"
+    return "patch"
 
 
 def _release_url(package_version: str) -> str:
@@ -361,7 +361,7 @@ def validate_discovery(
         "discovery.release",
     )
     version = _string(release["version"], "discovery.release.version")
-    _newer_point_version(configured_version, version, "FFmpeg discovery")
+    _upstream_update_kind(configured_version, version, "FFmpeg discovery")
     expected_url = f"https://ffmpeg.org/releases/ffmpeg-{version}.tar.xz"
     if release["sourceURL"] != expected_url:
         raise CandidateError("discovery.release.sourceURL is not canonical")
@@ -440,9 +440,20 @@ def generate_candidate_documents(
         allow_placeholder=False,
     )
     old_package_tuple = _semver(package_version, "release.packageVersion")
-    new_package_version = (
-        f"{old_package_tuple[0]}.{old_package_tuple[1]}.{old_package_tuple[2] + 1}"
+    update_kind = _upstream_update_kind(
+        ffmpeg_version, release["version"], "FFmpeg discovery"
     )
+    if update_kind == "major":
+        new_package_tuple = (old_package_tuple[0] + 1, 0, 0)
+    elif update_kind == "minor":
+        new_package_tuple = (old_package_tuple[0], old_package_tuple[1] + 1, 0)
+    else:
+        new_package_tuple = (
+            old_package_tuple[0],
+            old_package_tuple[1],
+            old_package_tuple[2] + 1,
+        )
+    new_package_version = ".".join(str(component) for component in new_package_tuple)
 
     candidate = copy.deepcopy(base_config)
     candidate["packageVersion"] = new_package_version
@@ -533,7 +544,7 @@ def advance_capability_oracle(
         raise CandidateError(
             "built capability FFmpeg version does not match the candidate release"
         )
-    _newer_point_version(
+    _upstream_update_kind(
         reviewed_version,
         target_ffmpeg_version,
         "capability oracle",
