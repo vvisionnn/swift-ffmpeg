@@ -58,4 +58,14 @@ tracked_binary="$(
     exit 1
 }
 
+tracked_plan="$(
+    git -C "$PROJECT_ROOT" ls-files |
+        /usr/bin/grep -E '(^|/)[^/]*PLAN\.md$' |
+        /usr/bin/head -1 || true
+)"
+[[ -z "$tracked_plan" ]] || {
+    echo "Session plan must not be tracked: $tracked_plan" >&2
+    exit 1
+}
+
 echo "Repository lint passed"

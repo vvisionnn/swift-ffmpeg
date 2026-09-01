@@ -1,5 +1,5 @@
-Independent JPEG Group-derived files included through FFmpeg 9.0
-================================================================
+Independent JPEG Group-derived files included through FFmpeg
+=============================================================
 
 This software is based in part on the work of the Independent JPEG Group.
 
@@ -11,7 +11,7 @@ The included files and their upstream copyright notices are:
 
 The swift-ffmpeg package makes no additions, deletions, or other changes to
 these three files. They are included exactly as supplied in the verified
-FFmpeg 9.0 source archive.
+FFmpeg source archive identified by Configuration/release.json.
 
 All Rights Reserved except as specified below.
 

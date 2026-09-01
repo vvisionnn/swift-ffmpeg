@@ -1,8 +1,10 @@
 # Changelog
 
-All notable package changes are documented here. Package versions are
-independent from FFmpeg versions so packaging-only corrections always receive
-a new immutable SemVer release.
+Hand-authored packaging and policy changes are documented here. Package
+versions are independent from FFmpeg versions so packaging-only corrections
+always receive a new immutable SemVer release. For every release, the exact
+package version, upstream versions, sources, and artifact checksums are recorded
+in `Configuration/release.json`, the release manifest, and the release notes.
 
 ## 1.0.0 — 2026-09-01
 

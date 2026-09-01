@@ -17,13 +17,15 @@ claim Linux, Windows, tvOS, watchOS, or visionOS support.
 
 ## Add the package
 
-Pin the exact release qualified by your application:
+Find the current immutable version on the
+[Releases](https://github.com/vvisionnn/swift-ffmpeg/releases) page, replace
+`X.Y.Z` below, and pin the exact release qualified by your application:
 
 ```swift
 dependencies: [
     .package(
         url: "https://github.com/vvisionnn/swift-ffmpeg.git",
-        exact: "1.0.0"
+        exact: "X.Y.Z"
     ),
 ],
 targets: [
@@ -45,7 +47,10 @@ let version = String(cString: av_version_info())
 ```
 
 The `FFmpeg` product carries its Apple framework/system-library link settings
-and privacy manifest. Release `1.0.0` contains FFmpeg 9.0 with dav1d 1.5.4.
+and privacy manifest. The package version, exact FFmpeg and dav1d sources, and
+artifact checksums for every tag are recorded in
+[`Configuration/release.json`](Configuration/release.json) and the assets of
+the corresponding immutable GitHub Release.
 
 Maintainer validation may set `SWIFT_FFMPEG_USE_LOCAL_XCFRAMEWORK=1` to use the
 ignored `Artifacts/FFmpeg.xcframework` path before a release is published.

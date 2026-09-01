@@ -2,9 +2,9 @@
 
 ## Supported versions
 
-Before `1.0.0` is published, security fixes are maintained on `main`. After
-publication, the newest package release is supported; older binary releases
-remain immutable and may be marked affected rather than replaced.
+The newest package release is supported. Older binary releases remain
+immutable and may be marked affected rather than replaced. Packaging fixes are
+prepared on `main` and published as a new immutable release.
 
 ## Reporting a vulnerability
 

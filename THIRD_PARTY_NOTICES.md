@@ -1,17 +1,19 @@
 # swift-ffmpeg third-party notices
 
-These notices cover the linked code in the `1.0.0` FFmpeg XCFramework. Every
-GitHub Release also carries the exact source archive, detached signature,
-patches, configuration, checksums, license texts, and relinking instructions
-for that binary. An application distributor remains responsible for reviewing
-its complete application and distribution method. This is not legal advice.
+These notices cover the linked code in the FFmpeg XCFramework identified by
+the checked-out tag's
+[`Configuration/release.json`](Configuration/release.json). Every GitHub
+Release also carries the exact source archive, detached signature, patches,
+configuration, checksums, license texts, and relinking instructions for that
+binary. An application distributor remains responsible for reviewing its
+complete application and distribution method. This is not legal advice.
 
-## FFmpeg 9.0
+## FFmpeg
 
 - Project: <https://ffmpeg.org/>
 - License in this build: GNU Lesser General Public License 2.1 or later
-- Canonical source: <https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz>
-- Source SHA-256: `7f607a00dd0d28a729d5a4811205812eef01cf6ef6155025febb6f36a9062d52`
+- Exact version, canonical source URL, signature URL, and SHA-256:
+  [`Configuration/release.json`](Configuration/release.json)
 - License: [Licenses/FFmpeg-LGPL-2.1.txt](Licenses/FFmpeg-LGPL-2.1.txt)
 - Relinking guide: [Licenses/FFmpeg-Static-Relinking.md](Licenses/FFmpeg-Static-Relinking.md)
 
@@ -32,12 +34,12 @@ not change those files. Their terms are reproduced in
 [Licenses/Independent-JPEG-Group.txt](Licenses/Independent-JPEG-Group.txt) and
 remain available in the exact FFmpeg source archive.
 
-## dav1d 1.5.4
+## dav1d
 
 - Project: <https://code.videolan.org/videolan/dav1d>
 - License: BSD 2-Clause
-- Canonical source: <https://code.videolan.org/videolan/dav1d/-/archive/1.5.4/dav1d-1.5.4.tar.bz2>
-- Source SHA-256: `2abfb0c89212e6e4733a54e0ae509ec00a5b845a6360946f918806e14aedb011`
+- Exact version, canonical source URL, and SHA-256:
+  [`Configuration/release.json`](Configuration/release.json)
 - License: [Licenses/dav1d-BSD-2-Clause.txt](Licenses/dav1d-BSD-2-Clause.txt)
 
 dav1d is statically included to provide software AV1 decoding.
