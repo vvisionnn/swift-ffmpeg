@@ -199,13 +199,88 @@ if [[ -n "$fixture_root" ]]; then
     /bin/cp "$artifact_source" "$downloaded_artifact"
 else
     require_command curl
-    /usr/bin/curl --disable --fail --location \
-        --proto '=https' --proto-redir '=https' --tlsv1.2 \
-        --continue-at - --retry 3 --retry-all-errors --retry-delay 2 \
-        --connect-timeout 30 --speed-limit 1024 --speed-time 120 \
-        --max-filesize 1073741824 --show-error --silent \
-        --output "$downloaded_artifact" \
-        "https://github.com/vvisionnn/swift-ffmpeg/releases/download/$tag/$ARTIFACT_NAME"
+    asset_url="https://github.com/vvisionnn/swift-ffmpeg/releases/download/$tag/$ARTIFACT_NAME"
+    chunk_size=1048576
+    chunk_start=0
+    chunk_index=0
+    asset_size=""
+    /usr/bin/touch "$downloaded_artifact"
+    while [[ -z "$asset_size" || "$chunk_start" -lt "$asset_size" ]]; do
+        chunk_end=$((chunk_start + chunk_size - 1))
+        chunk_headers="$work_root/download-headers"
+        chunk_path="$work_root/download-chunk"
+        /usr/bin/curl --disable --fail --location \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --range "${chunk_start}-${chunk_end}" \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 30 --speed-limit 1024 --speed-time 120 \
+            --max-filesize "$chunk_size" --show-error --silent \
+            --dump-header "$chunk_headers" \
+            --output "$chunk_path" \
+            "$asset_url"
+        read -r observed_start observed_end observed_size < <(
+            "$python_command" - "$chunk_headers" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+headers = Path(sys.argv[1]).read_text(encoding="iso-8859-1")
+matches = re.findall(
+    r"(?im)^content-range:\s*bytes\s+([0-9]+)-([0-9]+)/([0-9]+)\s*$",
+    headers,
+)
+if len(matches) != 1:
+    raise SystemExit("release asset response lacks one exact Content-Range")
+print(*matches[0])
+PY
+        )
+        [[ "$observed_start" == "$chunk_start" ]] || {
+            echo "Release asset returned an unexpected range start" >&2
+            exit 1
+        }
+        [[ "$observed_end" =~ ^[0-9]+$ && "$observed_size" =~ ^[1-9][0-9]*$ ]] || {
+            echo "Release asset returned malformed range metadata" >&2
+            exit 1
+        }
+        ((observed_end >= observed_start && observed_end < observed_size)) || {
+            echo "Release asset returned an invalid byte range" >&2
+            exit 1
+        }
+        [[ -z "$asset_size" || "$asset_size" == "$observed_size" ]] || {
+            echo "Release asset size changed during download" >&2
+            exit 1
+        }
+        asset_size="$observed_size"
+        ((asset_size <= 1073741824)) || {
+            echo "Release asset exceeds the 1 GiB limit" >&2
+            exit 1
+        }
+        expected_end="$chunk_end"
+        if ((expected_end >= asset_size)); then
+            expected_end=$((asset_size - 1))
+        fi
+        [[ "$observed_end" == "$expected_end" ]] || {
+            echo "Release asset returned an incomplete byte range" >&2
+            exit 1
+        }
+        chunk_bytes="$((observed_end - observed_start + 1))"
+        [[ "$(/usr/bin/stat -f '%z' "$chunk_path")" == "$chunk_bytes" ]] || {
+            echo "Release asset chunk length does not match Content-Range" >&2
+            exit 1
+        }
+        /bin/dd \
+            if="$chunk_path" \
+            of="$downloaded_artifact" \
+            bs="$chunk_size" \
+            seek="$chunk_index" \
+            conv=notrunc 2>/dev/null
+        chunk_start=$((observed_end + 1))
+        chunk_index=$((chunk_index + 1))
+    done
+    [[ "$(/usr/bin/stat -f '%z' "$downloaded_artifact")" == "$asset_size" ]] || {
+        echo "Release asset assembly has an unexpected size" >&2
+        exit 1
+    }
 fi
 artifact_size="$("$python_command" - "$downloaded_artifact" <<'PY'
 from pathlib import Path
