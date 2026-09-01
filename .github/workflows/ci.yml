@@ -84,6 +84,7 @@ jobs:
             make -j2
             make install
           )
+          ln -s pkgconf "$pkgconf_prefix/bin/pkg-config"
           test "$("$pkgconf_prefix/bin/pkg-config" --version)" = "$pkgconf_version"
           printf '%s\n' "$pkgconf_prefix/bin" >>"$GITHUB_PATH"
 
