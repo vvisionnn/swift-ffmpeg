@@ -1,0 +1,147 @@
+# swift-ffmpeg implementation plan
+
+This is the authoritative ledger for extracting the Apple FFmpeg binary from
+SwiftMediaToolbox into a small, independently maintained Swift package. The
+goal is packaging and release automation, not a second playback framework.
+
+## Mission
+
+Publish an immutable, checksum-pinned `FFmpeg` Swift package product for iOS,
+iOS Simulator, and macOS. Every release must be reproducible, LGPL-compliant,
+validated as a fresh SwiftPM dependency, and built from the canonical signed
+FFmpeg source. A daily GitHub Actions check should do no expensive build when
+upstream is unchanged and should fail closed before publication when anything
+changes unexpectedly.
+
+## Boundary
+
+`swift-ffmpeg` owns only:
+
+- canonical FFmpeg and dav1d source discovery, download, and verification;
+- the reviewed local FFmpeg hardening patches;
+- deterministic five-slice compilation and three-variant XCFramework assembly;
+- binary, module, platform, configuration, symbol, license, and consumer tests;
+- release archives, checksums, source/relink kits, provenance, and automation.
+
+It does not own a player, Swift playback API, UI, media policy, custom network
+transport, authentication, LibASS, or SwiftMediaToolbox's C shim. Its sole
+library product and Clang module are both named `FFmpeg`.
+
+## Supported artifact
+
+| Variant | Architectures | Minimum OS |
+| --- | --- | --- |
+| iOS device | arm64 | iOS 15 |
+| iOS Simulator | arm64, x86_64 | iOS 15 |
+| macOS | arm64, x86_64 | macOS 12 |
+
+No other Apple platform, Linux, or Windows support is claimed until a native
+slice and an executable qualification gate exist for it.
+
+## Release contract
+
+- Version the Swift package independently from FFmpeg so a packaging-only
+  correction has a valid new SemVer: bump the package major when a linked
+  FFmpeg library major changes, minor for upstream feature releases with
+  stable library majors, and patch for upstream point releases or packaging
+  corrections. Record both versions in every manifest and release title.
+  Never move a tag, replace an asset, or mutate a published release.
+- Poll FFmpeg's canonical download page, not its GitHub mirror. Accept only the
+  latest stable source tarball and detached signature served by `ffmpeg.org`.
+- Verify the signature with an isolated checked-in release-key keyring and the
+  exact allowed fingerprint before extracting anything.
+- Keep dav1d at an explicitly reviewed version and SHA-256; updating it is a
+  separate manifest change, even when triggered by an FFmpeg release.
+- Build FFmpeg twice in independent roots, normalize the release ZIP twice,
+  and require equal SHA-256 digests before promotion.
+- Keep GPL, version-3-only, nonfree features, encoders, `avfilter`, and all
+  muxers except `spdif` disabled. Preserve network, SecureTransport,
+  VideoToolbox, AudioToolbox, zlib, bz2, iconv, and dav1d support.
+- Preserve the reviewed decoder limits and the removal of private
+  `_SecIdentityCreate`; a patch mismatch blocks a release.
+- Put `FFmpeg.xcframework` at the ZIP root. The tag's `Package.swift` must name
+  that same tag's GitHub Release URL and the checksum calculated by SwiftPM.
+- Attach exact corresponding sources, patches, checksums, toolchain manifest,
+  licenses, notices, relinking instructions, and build provenance to every
+  binary release.
+- Validate locally against the exact ZIP before publication, then validate a
+  fresh remote SwiftPM consumer after the immutable tag and asset exist.
+
+## Milestones
+
+### 1. Architecture and baseline
+
+- [x] Confirm the extraction seam is the third-party `FFmpeg` binary target
+  below SwiftMediaToolbox's existing `CFFmpegShim`.
+- [x] Record the current FFmpeg 9.0/dav1d 1.5.4 artifact as the parity oracle:
+  five thin slices, three variants, 515 decoders, 359 demuxers, one `spdif`
+  muxer, 33 input protocols, and no private `_SecIdentityCreate` reference.
+- [x] Record the canonical upstream and GitHub Actions security/release model.
+- [>] Commit this plan as the new repository's isolated first checkpoint.
+
+### 2. Local package and reproducible build
+
+- [ ] Add the Swift package manifest, source manifest, patch series, legal
+  materials, support headers, documentation, and ignored build directories.
+- [ ] Add pinned `mise` tools and task wrappers while keeping the invoked shell
+  scripts directly runnable for contributors and relinking recipients.
+- [ ] Generalize the existing deterministic builder around explicit
+  `DEVELOPER_DIR`, source-manifest inputs, isolated download/cache directories,
+  and output paths.
+- [ ] Add cheap source/upstream checks plus artifact, configuration, symbol,
+  platform, module import, package-consumer, and reproducibility gates.
+- [ ] Build and validate the initial XCFramework locally.
+
+### 3. Public repository and bootstrap release
+
+- [ ] Create only `vvisionnn/swift-ffmpeg` as a public GitHub repository and
+  push the locally reviewed history.
+- [ ] Add SHA-pinned, read-only-by-default CI for pushes, pull requests, and
+  manual runs.
+- [ ] Bootstrap `1.0.0` as an immutable FFmpeg 9.0 parity release, calculate its
+  SwiftPM checksum, commit the matching remote manifest, and prove a fresh
+  remote consumer can import and link `FFmpeg` on macOS and iOS Simulator.
+
+### 4. Daily upstream automation
+
+- [ ] Add a serialized daily/default-branch and manual workflow that exits
+  successfully without a macOS build when the stable version is unchanged.
+- [ ] For a new version, verify source provenance, build twice, validate every
+  gate, prepare the same-tag manifest, create a draft release, upload and
+  verify all assets, attest the binary/source-kit provenance, publish, and
+  synchronize the released manifest to `main`.
+- [ ] Manually dispatch the workflow for current stable FFmpeg 9.0.1, produce
+  the independently versioned package update, and debug at most five attempts
+  until the hosted release and post-publish remote consumer tests pass.
+
+### 5. SwiftMediaToolbox integration
+
+- [ ] Switch SwiftMediaToolbox from its local binary target to an exact
+  `swift-ffmpeg` package/product dependency and generate deterministic lockfiles.
+- [ ] Remove only its externalized FFmpeg/dav1d binary-build inputs while
+  retaining all toolbox sources, LibASS, fixtures, behavior, and public APIs.
+- [ ] Update architecture/release scanners and both repositories' documentation.
+- [ ] Pass the full package, policy, coverage (at least 95%), platform,
+  Simulator, codec/format, Demo, audio/video GUI, and metrics qualification.
+- [ ] Complete both plan ledgers, commit each isolated result, push both repos,
+  and verify clean synchronized local and remote states.
+
+## Retry ledger
+
+Each failing milestone gate gets at most five fix-and-retry attempts. A failed
+release never reuses a published version or asset.
+
+| Gate | Attempt | Result / next action |
+| --- | ---: | --- |
+| Architecture and plan | 1 | PASS: minimal ownership and immutable release model recorded |
+| Local package | 0 | Not started |
+| Bootstrap release | 0 | Not started |
+| Daily upstream release | 0 | Not started |
+| SwiftMediaToolbox integration | 0 | Not started |
+| Final qualification | 0 | Not started |
+
+## Evidence ledger
+
+Evidence will be appended as each checkbox completes. A checkbox is not done
+without the command, artifact digest, workflow run, test result, or manual
+observation that proves it.
