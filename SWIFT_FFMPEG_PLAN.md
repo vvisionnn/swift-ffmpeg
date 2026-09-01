@@ -88,7 +88,7 @@ slice and an executable qualification gate exist for it.
 - [x] Generalize the existing deterministic builder around explicit
   `DEVELOPER_DIR`, source-manifest inputs, isolated download/cache directories,
   and output paths.
-- [>] Add cheap source/upstream checks plus artifact, configuration, symbol,
+- [x] Add cheap source/upstream checks plus artifact, configuration, symbol,
   platform, module import, package-consumer, and reproducibility gates.
 - [x] Build and validate the initial XCFramework locally.
 
@@ -170,3 +170,6 @@ observation that proves it.
 - `mise` 2026.8.16 installed and locked Python 3.13.15, Meson 1.11.2, Ninja
   1.13.2, jq 1.8.2, ShellCheck 0.11.0, and actionlint 1.7.12. `mise run doctor`
   and `mise run lint` pass.
+- Thirty adversarial discovery tests pass, and the canonical FFmpeg download
+  page identifies signed stable release 9.0.1 (2026-08-12) as the one update
+  over the configured 9.0 baseline.

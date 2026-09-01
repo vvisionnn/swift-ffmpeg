@@ -21,6 +21,15 @@ run = "./Scripts/fetch-sources.sh"
 description = "Verify source hashes, FFmpeg signature/key, and archive roots"
 run = "./Scripts/verify-sources.sh"
 
+[tasks."test:discovery"]
+description = "Run adversarial canonical-upstream discovery tests"
+run = "python3 -I -B -m unittest discover -s Tests/DiscoveryTests -p 'test_*.py' -v"
+
+[tasks."upstream:check"]
+description = "Discover the canonical current stable FFmpeg release"
+depends = ["test:discovery"]
+run = "./Scripts/discover-ffmpeg-release.py"
+
 [tasks.build]
 description = "Build all five thin slices and assemble FFmpeg.xcframework"
 depends = ["doctor", "sources:verify"]
@@ -68,6 +77,7 @@ run = "./Scripts/lint.sh"
 description = "Run the normal local and CI qualification suite"
 depends = [
   "lint",
+  "test:discovery",
   "sources:verify",
   "artifact:verify",
   "test:local",

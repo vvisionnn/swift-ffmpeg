@@ -14,7 +14,7 @@ load_release_configuration
 }
 
 for command_name in \
-    clang curl gpg jq meson ninja pkg-config swift xcodebuild xcrun
+    clang curl gpg jq meson ninja pkg-config python3 swift xcodebuild xcrun
 do
     require_command "$command_name"
 done
