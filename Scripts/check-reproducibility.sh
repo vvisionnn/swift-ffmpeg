@@ -18,22 +18,68 @@ case "$mode" in
 esac
 
 evidence_root="$PROJECT_ROOT/.artifacts/reproducibility"
+case "$evidence_root" in
+    "$PROJECT_ROOT/.artifacts/"*) ;;
+    *)
+        echo "Unsafe reproducibility evidence root: $evidence_root" >&2
+        exit 1
+        ;;
+esac
 /bin/rm -rf "$evidence_root"
 mkdir -p "$evidence_root"
 first_started="$(date +%s)"
+selected_developer_dir="${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}"
+
+copy_checkout() {
+    local destination="$1"
+    local relative_path
+
+    mkdir -p "$destination"
+    while IFS= read -r -d '' relative_path; do
+        case "/$relative_path/" in
+            */../*|*/./*)
+                echo "Unsafe tracked path: $relative_path" >&2
+                exit 1
+                ;;
+        esac
+        mkdir -p "$destination/$(/usr/bin/dirname "$relative_path")"
+        /bin/cp -pP "$PROJECT_ROOT/$relative_path" "$destination/$relative_path"
+    done < <(git -C "$PROJECT_ROOT" ls-files -z)
+
+    mkdir -p "$destination/.cache/sources"
+    /bin/cp -p \
+        "$FFMPEG_TARBALL" \
+        "$FFMPEG_SIGNATURE" \
+        "$DAV1D_TARBALL" \
+        "$destination/.cache/sources/"
+}
 
 for attempt in 1 2; do
     attempt_root="$evidence_root/attempt-$attempt"
     mkdir -p "$attempt_root"
     if [[ "$mode" == "--full" ]]; then
-        SWIFT_FFMPEG_BUILD_ROOT="$PROJECT_ROOT/.build/ffmpeg-repro-$attempt" \
-            "$SCRIPT_DIR/build-xcframework.sh"
+        checkout_root="$attempt_root/checkout-$attempt"
+        developer_alias="$attempt_root/XcodeDeveloper-$attempt"
+        copy_checkout "$checkout_root"
+        /bin/ln -s "$selected_developer_dir" "$developer_alias"
+        (
+            cd "$checkout_root"
+            DEVELOPER_DIR="$developer_alias" \
+                ./Scripts/build-xcframework.sh
+            ./Scripts/validate-artifact.sh
+            ./Scripts/package-xcframework.sh
+        )
+        attempt_xcframework="$checkout_root/Artifacts/FFmpeg.xcframework"
+        attempt_zip="$checkout_root/.artifacts/release/$ARTIFACT_NAME"
+    else
+        "$SCRIPT_DIR/validate-artifact.sh"
+        "$SCRIPT_DIR/package-xcframework.sh"
+        attempt_xcframework="$XCFRAMEWORK"
+        attempt_zip="$RELEASE_ZIP"
     fi
-    "$SCRIPT_DIR/validate-artifact.sh"
-    "$SCRIPT_DIR/package-xcframework.sh"
-    /bin/cp "$RELEASE_ZIP" "$attempt_root/$ARTIFACT_NAME"
+    /bin/cp "$attempt_zip" "$attempt_root/$ARTIFACT_NAME"
     (
-        cd "$LOCAL_ARTIFACT_ROOT"
+        cd "$(/usr/bin/dirname "$attempt_xcframework")"
         /usr/bin/find FFmpeg.xcframework -type f -print |
             LC_ALL=C /usr/bin/sort |
             while IFS= read -r path; do

@@ -49,6 +49,38 @@ verify_sha256() {
     assert_exact_value "$label SHA-256" "$expected" "$actual"
 }
 
+assert_safe_generated_root() {
+    local label="$1"
+    local path="$2"
+    local project_parent="$3"
+    local temporary_parent
+
+    [[ "$path" == /* ]] || {
+        echo "$label must be an absolute path: $path" >&2
+        return 1
+    }
+    case "$path/" in
+        */../*|*/./*|*//* )
+            echo "$label contains an unsafe path component: $path" >&2
+            return 1
+            ;;
+    esac
+    if [[ "$path" == "$project_parent/"* ]]; then
+        return 0
+    fi
+
+    for temporary_parent in "${RUNNER_TEMP:-}" "${TMPDIR:-}" /tmp; do
+        temporary_parent="${temporary_parent%/}"
+        [[ -n "$temporary_parent" ]] || continue
+        if [[ "$path" == "$temporary_parent/swift-ffmpeg/"* ]]; then
+            return 0
+        fi
+    done
+
+    echo "$label must be below $project_parent or a swift-ffmpeg temp root: $path" >&2
+    return 1
+}
+
 load_release_configuration() {
     local package_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
     local upstream_pattern='^[1-9][0-9]*\.[0-9]+(\.[0-9]+)?$'
@@ -154,6 +186,12 @@ load_release_configuration() {
     SOURCE_CACHE_ROOT="${SWIFT_FFMPEG_SOURCE_CACHE_ROOT:-$PROJECT_ROOT/.cache/sources}"
     BUILD_ROOT="${SWIFT_FFMPEG_BUILD_ROOT:-$PROJECT_ROOT/.build/ffmpeg}"
     ARTIFACT_ROOT="${SWIFT_FFMPEG_ARTIFACT_ROOT:-$PROJECT_ROOT/.artifacts/release}"
+    assert_safe_generated_root \
+        "Source cache root" "$SOURCE_CACHE_ROOT" "$PROJECT_ROOT/.cache"
+    assert_safe_generated_root \
+        "Build root" "$BUILD_ROOT" "$PROJECT_ROOT/.build"
+    assert_safe_generated_root \
+        "Release artifact root" "$ARTIFACT_ROOT" "$PROJECT_ROOT/.artifacts"
     LOCAL_ARTIFACT_ROOT="$PROJECT_ROOT/Artifacts"
     FFMPEG_TARBALL="$SOURCE_CACHE_ROOT/ffmpeg-${FFMPEG_VERSION}.tar.xz"
     FFMPEG_SIGNATURE="$FFMPEG_TARBALL.asc"

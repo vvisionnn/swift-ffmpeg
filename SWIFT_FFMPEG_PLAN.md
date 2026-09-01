@@ -154,15 +154,19 @@ observation that proves it.
 - `Scripts/build-xcframework.sh` rebuilt all five slices with Xcode 16.4
   (`16F6`), iOS SDK 18.5, and macOS SDK 15.5, then assembled the three expected
   variants with no private symbol or configuration-policy rejection.
-- `Scripts/validate-artifact.sh` accepted the rebuilt archive hashes:
-  `a4b0c460...a4636` (iOS), `686fd616...9ee4` (Simulator), and
-  `9b47e79f...f115e` (macOS).
+- `Scripts/validate-artifact.sh` accepted the host-path-independent archive
+  hashes: `85edc67f...192ba` (iOS), `84cb9a14...f6f16` (Simulator), and
+  `277b50f5...37fd7` (macOS).
 - Two normalized packages matched SwiftPM checksum
-  `f6ca366a...92f49`. Three Swift package smoke tests, a release build, and an
+  `02a8f3f7...e9b66`. Three Swift package smoke tests, a release build, and an
   external consumer with no linker settings passed on macOS.
+- Two complete builds from distinct checkout roots and distinct Xcode path
+  aliases produced the same XCFramework file manifest and release ZIP in
+  661 seconds. Exact capability parity passed for all five thin slices.
 - Simulator attempt 1 rejected the assumed `swift-ffmpeg-Package` scheme;
   after binding the generated `swift-ffmpeg` scheme, attempt 2 built and ran
-  all three tests on iPhone 16 successfully.
+  all three tests on iPhone 16 successfully. The final gate also linked a
+  generic arm64 iOS-device test bundle with signing disabled.
 - `mise` 2026.8.16 installed and locked Python 3.13.15, Meson 1.11.2, Ninja
   1.13.2, jq 1.8.2, ShellCheck 0.11.0, and actionlint 1.7.12. `mise run doctor`
   and `mise run lint` pass.

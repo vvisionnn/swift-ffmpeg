@@ -8,6 +8,9 @@ source "$SCRIPT_DIR/lib/common.sh"
 reject_shell_startup_environment
 load_release_configuration
 
+VALIDATION_TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/swift-ffmpeg-validation.XXXXXX")"
+trap '/bin/rm -rf "$VALIDATION_TEMP_ROOT"' EXIT
+
 assert_architectures() {
     local archive="$1"
     local expected="$2"
@@ -99,9 +102,11 @@ assert_symbols_and_configuration() {
     local registered_muxers
     local strings_output
     local required_flag
+    local thin_archive
+    local architecture_count
 
     for architecture in "$@"; do
-        nm_output="$(mktemp "${TMPDIR:-/tmp}/swift-ffmpeg-nm.XXXXXX")"
+        nm_output="$VALIDATION_TEMP_ROOT/nm-$label-$architecture.txt"
         /usr/bin/nm -arch "$architecture" "$archive" >"$nm_output"
         if /usr/bin/grep -Eq '(^|[[:space:]])_SecIdentityCreate$' "$nm_output"; then
             echo "$label/$architecture references private _SecIdentityCreate" >&2
@@ -121,30 +126,46 @@ assert_symbols_and_configuration() {
             "$label/$architecture registered muxers" \
             "_ff_spdif_muxer" \
             "$registered_muxers"
-    done
 
-    strings_output="$(mktemp "${TMPDIR:-/tmp}/swift-ffmpeg-strings.XXXXXX")"
-    /usr/bin/strings "$archive" >"$strings_output"
-    for required_flag in \
-        --enable-libdav1d \
-        --disable-shared \
-        --enable-static \
-        --disable-encoders \
-        --disable-muxers \
-        --enable-muxer=spdif \
-        --disable-autodetect
-    do
-        /usr/bin/grep -Fq -- "$required_flag" "$strings_output" || {
-            echo "$label configuration is missing $required_flag" >&2
+        architecture_count="$(/usr/bin/lipo -archs "$archive" | /usr/bin/wc -w | /usr/bin/xargs)"
+        thin_archive="$archive"
+        if [[ "$architecture_count" -gt 1 ]]; then
+            thin_archive="$VALIDATION_TEMP_ROOT/$label-$architecture.a"
+            /usr/bin/lipo "$archive" -thin "$architecture" -output "$thin_archive"
+        fi
+        strings_output="$VALIDATION_TEMP_ROOT/strings-$label-$architecture.txt"
+        /usr/bin/strings "$thin_archive" >"$strings_output"
+        for required_flag in \
+            --enable-libdav1d \
+            --disable-shared \
+            --enable-static \
+            --disable-encoders \
+            --disable-muxers \
+            --enable-muxer=spdif \
+            --disable-autodetect \
+            --cc=apple-clang \
+            --cxx=apple-clang++ \
+            --sysroot=apple-sdk \
+            "--ar='swift-ffmpeg-deterministic-ar --deterministic-ar'"
+        do
+            /usr/bin/grep -Fq -- "$required_flag" "$strings_output" || {
+                echo "$label/$architecture configuration is missing $required_flag" >&2
+                exit 1
+            }
+        done
+        if /usr/bin/grep -Eq \
+            -- "--(cc|cxx|ar|sysroot)=('?/|\"?/)" \
+            "$strings_output"; then
+            echo "$label/$architecture configuration leaks a host-specific tool or SDK path" >&2
             exit 1
-        }
+        fi
+        if /usr/bin/grep -Eq \
+            -- '--enable-(gpl|nonfree|version3)([[:space:]]|$)' \
+            "$strings_output"; then
+            echo "$label/$architecture contains a forbidden license configuration" >&2
+            exit 1
+        fi
     done
-    if /usr/bin/grep -Eq \
-        -- '--enable-(gpl|nonfree|version3)([[:space:]]|$)' \
-        "$strings_output"; then
-        echo "$label contains a forbidden license configuration" >&2
-        exit 1
-    fi
 }
 
 assert_matching_headers() {
@@ -186,22 +207,51 @@ assert_matching_headers() {
 
 assert_release_manifest() {
     local release_url
+    local remote_manifest
+    local local_manifest
     release_url="https://github.com/vvisionnn/swift-ffmpeg/releases/download/${PACKAGE_VERSION}/${ARTIFACT_NAME}"
-    /usr/bin/grep -Fq "url: \"$release_url\"" "$PROJECT_ROOT/Package.swift" || {
-        echo "Package.swift does not reference the configured same-version asset" >&2
-        exit 1
-    }
-    /usr/bin/grep -Fq "checksum: \"$ARTIFACT_CHECKSUM\"" "$PROJECT_ROOT/Package.swift" || {
-        echo "Package.swift checksum differs from release.json" >&2
-        exit 1
-    }
+    remote_manifest="$VALIDATION_TEMP_ROOT/package-remote.json"
+    local_manifest="$VALIDATION_TEMP_ROOT/package-local.json"
     (
         cd "$PROJECT_ROOT"
         env -u SWIFT_FFMPEG_USE_LOCAL_XCFRAMEWORK \
-            swift package dump-package >/dev/null
+            swift package dump-package >"$remote_manifest"
         SWIFT_FFMPEG_USE_LOCAL_XCFRAMEWORK=1 \
-            swift package dump-package >/dev/null
+            swift package dump-package >"$local_manifest"
     )
+    jq -e \
+        --arg url "$release_url" \
+        --arg checksum "$ARTIFACT_CHECKSUM" '
+            ([.targets[] | select(.name == "FFmpeg")] | length) == 1 and
+            ([.targets[] | select(
+                .name == "FFmpeg" and
+                .type == "binary" and
+                .url == $url and
+                .checksum == $checksum and
+                (has("path") | not)
+            )] | length) == 1 and
+            ([.products[] | select(
+                .name == "FFmpeg" and
+                .type.library != null and
+                .targets == ["FFmpeg", "FFmpegLinkerSupport"]
+            )] | length) == 1
+        ' "$remote_manifest" >/dev/null || {
+        echo "Remote Package.swift FFmpeg product/target does not match release.json" >&2
+        exit 1
+    }
+    jq -e '
+            ([.targets[] | select(.name == "FFmpeg")] | length) == 1 and
+            ([.targets[] | select(
+                .name == "FFmpeg" and
+                .type == "binary" and
+                .path == "Artifacts/FFmpeg.xcframework" and
+                (has("url") | not) and
+                (has("checksum") | not)
+            )] | length) == 1
+        ' "$local_manifest" >/dev/null || {
+        echo "Local Package.swift mode does not select the reviewed XCFramework path" >&2
+        exit 1
+    }
 }
 
 [[ -d "$XCFRAMEWORK" ]] || {
@@ -275,4 +325,5 @@ if [[ -f "$RELEASE_ZIP" ]]; then
     done <<<"$archive_entries"
 fi
 
+"$SCRIPT_DIR/test-capabilities.sh"
 echo "Validated FFmpeg $FFMPEG_VERSION artifact for package $PACKAGE_VERSION"

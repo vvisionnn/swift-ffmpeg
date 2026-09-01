@@ -3,5 +3,7 @@
 .build/
 .cache/
 .swiftpm/xcode/package.xcworkspace/xcuserdata/
+__pycache__/
+*.py[cod]
 Artifacts/
 DerivedData/

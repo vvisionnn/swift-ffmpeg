@@ -22,6 +22,22 @@ case "$evidence_root" in
 esac
 /bin/rm -rf "$evidence_root"
 mkdir -p "$evidence_root"
+
+device_build_log="$evidence_root/device-build-for-testing.log"
+if ! SWIFT_FFMPEG_USE_LOCAL_XCFRAMEWORK=1 xcodebuild build-for-testing \
+    -quiet \
+    -scheme swift-ffmpeg \
+    -configuration Debug \
+    -destination "generic/platform=iOS" \
+    -derivedDataPath "$evidence_root/DeviceDerivedData" \
+    -disableAutomaticPackageResolution \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    >"$device_build_log" 2>&1; then
+    /usr/bin/tail -100 "$device_build_log" >&2 || true
+    exit 1
+fi
+
 runtimes_json="$evidence_root/runtimes.json"
 devices_json="$evidence_root/devices.json"
 xcrun simctl list runtimes available -j >"$runtimes_json"
@@ -115,4 +131,4 @@ jq -n -S \
       result: "pass"
     }' >"$evidence_root/summary.json"
 
-echo "iOS Simulator tests passed on $simulator_name ($simulator_udid)"
+echo "iOS device build and Simulator tests passed on $simulator_name ($simulator_udid)"

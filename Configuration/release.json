@@ -1,13 +1,13 @@
 {
   "artifact": {
     "name": "FFmpeg.xcframework.zip",
-    "swiftPackageChecksum": "f6ca366a0bc4ccb4716e4fade1683c318249c3d53c5f324cb465442230a92f49",
+    "swiftPackageChecksum": "02a8f3f7a746fba95b1242cd6350ac6a3e1f3f128e1a2495c9c82328d12e9b66",
     "xcframework": {
       "infoPlistSHA256": "699137b8f423e48da9f5628570ce0927c6d84d68cfd8b8bed13a1f42b27a54db",
       "slices": {
-        "ios-arm64": "a4b0c460b7070ba780458c1fb49bad334ce842cc6a69bddf00242ac1cd8a4636",
-        "ios-arm64_x86_64-simulator": "686fd616c3241a8b8cb9e4f79ea949482e10ac0cb508c1789d5c53ebdf3a9ee4",
-        "macos-arm64_x86_64": "9b47e79f02262c193a87a2d1162bb85d44c36f930d48dc8b68263ba57c8f115e"
+        "ios-arm64": "85edc67f5a147b0c8671cd13ff87d28e6dc68bb5de807cf0fdc96f43f7f192ba",
+        "ios-arm64_x86_64-simulator": "84cb9a1434cecf0af2b4e3dbf0c2320d8565fc10d294e2944682fb2b2a2f6f16",
+        "macos-arm64_x86_64": "277b50f5d7dc92b5b0590ddabf6b30717e4607e2c6342bcea92e4af00c537fd7"
       }
     }
   },

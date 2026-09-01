@@ -46,7 +46,7 @@ depends = ["artifact:verify"]
 run = "./Scripts/test-package.sh"
 
 [tasks."test:simulator"]
-description = "Build and run package tests on the newest iOS Simulator runtime"
+description = "Link for iOS device and run tests on the newest Simulator"
 depends = ["artifact:verify"]
 run = "./Scripts/test-ios-simulator.sh"
 

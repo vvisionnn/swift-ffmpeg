@@ -223,6 +223,38 @@ apply_ffmpeg_hardening_patch() {
     fi
 }
 
+normalize_ffmpeg_configuration() {
+    local source_root="$1"
+    local architecture="$2"
+    local triple="$3"
+    local architecture_flag="$4"
+    local config_header="$source_root/config.h"
+    local normalized_configuration
+    local temporary_header
+
+    # FFmpeg exposes its configure command through av_*_configuration(). The
+    # real compiler, SDK, and archive-wrapper paths are required while building
+    # but would otherwise make identical checkouts produce different bytes.
+    # Keep every semantic option while replacing only host-specific paths.
+    normalized_configuration="--prefix=/ffmpeg --target-os=darwin --arch=$architecture --enable-cross-compile --cc=apple-clang --cxx=apple-clang++ --ar='swift-ffmpeg-deterministic-ar --deterministic-ar' --ranlib=true --sysroot=apple-sdk --extra-cflags='-target $triple' --extra-ldflags='-target $triple' --disable-shared --enable-static --enable-pic --disable-programs --disable-doc --disable-debug --disable-avdevice --disable-avfilter --disable-encoders --disable-muxers --enable-muxer=spdif --disable-autodetect $architecture_flag --pkg-config=pkg-config --enable-libdav1d --enable-network --enable-securetransport --enable-videotoolbox --enable-audiotoolbox --enable-zlib --enable-bzlib --enable-iconv"
+
+    [[ -f "$config_header" ]] || {
+        echo "FFmpeg configure did not create $config_header" >&2
+        exit 1
+    }
+    temporary_header="$config_header.swift-ffmpeg.tmp"
+    /usr/bin/awk \
+        -v replacement="#define FFMPEG_CONFIGURATION \"$normalized_configuration\"" '
+            /^#define FFMPEG_CONFIGURATION / { print replacement; next }
+            { print }
+        ' "$config_header" >"$temporary_header"
+    [[ "$(/usr/bin/grep -c '^#define FFMPEG_CONFIGURATION ' "$temporary_header")" == "1" ]] || {
+        echo "Could not normalize FFmpeg configuration metadata" >&2
+        exit 1
+    }
+    /bin/mv "$temporary_header" "$config_header"
+}
+
 build_slice() {
     local name="$1"
     local sdk="$2"
@@ -232,9 +264,13 @@ build_slice() {
     local install_root="$BUILD_ROOT/install/$name"
     local log_root="$BUILD_ROOT/logs"
     local sdk_path
+    local compiler
+    local compiler_cxx
     local architecture_flag="--enable-asm"
 
     sdk_path="$(xcrun --sdk "$sdk" --show-sdk-path)"
+    compiler="$(xcrun --sdk "$sdk" --find clang)"
+    compiler_cxx="$(xcrun --sdk "$sdk" --find clang++)"
 
     # NASM emits x86_64 Mach-O objects without LC_BUILD_VERSION. Disabling
     # FFmpeg's x86 assembly keeps every archive member platform/minOS tagged.
@@ -260,7 +296,8 @@ build_slice() {
             --target-os=darwin \
             --arch="$architecture" \
             --enable-cross-compile \
-            --cc=clang \
+            --cc="$compiler" \
+            --cxx="$compiler_cxx" \
             --ar="$DETERMINISTIC_AR_ABSOLUTE --deterministic-ar" \
             --ranlib=true \
             --sysroot="$sdk_path" \
@@ -289,6 +326,9 @@ build_slice() {
             --enable-bzlib \
             --enable-iconv \
             >"$log_root/configure-$name.log" 2>&1
+
+        normalize_ffmpeg_configuration \
+            "$source_root" "$architecture" "$triple" "$architecture_flag"
 
         echo "Building FFmpeg for $name"
         /usr/bin/make -j"$BUILD_JOBS" >"$log_root/make-$name.log" 2>&1

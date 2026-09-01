@@ -58,9 +58,15 @@ assert_exact_value \
     "$EXPECTED_MACOSX_SDK_VERSION" \
     "$(xcrun --sdk macosx --show-sdk-version)"
 
-clang_version="$(xcrun --sdk macosx clang --version)"
-clang_version="${clang_version%%$'\n'*}"
-assert_exact_value "Apple clang" "$EXPECTED_CLANG_VERSION" "$clang_version"
+for sdk_name in iphoneos iphonesimulator macosx; do
+    clang_path="$(xcrun --sdk "$sdk_name" --find clang)"
+    clang_version="$("$clang_path" --version)"
+    clang_version="${clang_version%%$'\n'*}"
+    assert_exact_value \
+        "Apple clang for $sdk_name" \
+        "$EXPECTED_CLANG_VERSION" \
+        "$clang_version"
+done
 
 cctools_version="$(/usr/bin/libtool -V 2>&1)"
 cctools_version="${cctools_version%%$'\n'*}"
