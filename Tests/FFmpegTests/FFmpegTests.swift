@@ -1,4 +1,6 @@
 import FFmpeg
+import Foundation
+@testable import FFmpegLinkerSupport
 import Testing
 
 @Test
@@ -32,4 +34,35 @@ func exposesRequiredDemuxersAndProtocols() {
     #expect(protocols.contains("file"))
     #expect(protocols.contains("http"))
     #expect(protocols.contains("https"))
+}
+
+@Test
+func bundlesExpectedPrivacyManifest() throws {
+    let url = try #require(Bundle.module.url(
+        forResource: "PrivacyInfo",
+        withExtension: "xcprivacy"
+    ))
+    let data = try Data(contentsOf: url)
+    let document = try #require(
+        PropertyListSerialization.propertyList(from: data, format: nil)
+            as? [String: Any]
+    )
+
+    #expect(document["NSPrivacyTracking"] as? Bool == false)
+    #expect((document["NSPrivacyTrackingDomains"] as? [Any])?.isEmpty == true)
+    #expect((document["NSPrivacyCollectedDataTypes"] as? [Any])?.isEmpty == true)
+
+    let entries = try #require(
+        document["NSPrivacyAccessedAPITypes"] as? [[String: Any]]
+    )
+    #expect(entries.count == 1)
+    let entry = try #require(entries.first)
+    #expect(
+        entry["NSPrivacyAccessedAPIType"] as? String ==
+            "NSPrivacyAccessedAPICategoryFileTimestamp"
+    )
+    let reasons = try #require(
+        entry["NSPrivacyAccessedAPITypeReasons"] as? [String]
+    )
+    #expect(Set(reasons) == ["3B52.1", "C617.1"])
 }
