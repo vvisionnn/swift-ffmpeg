@@ -199,9 +199,11 @@ if [[ -n "$fixture_root" ]]; then
     /bin/cp "$artifact_source" "$downloaded_artifact"
 else
     require_command curl
-    /usr/bin/curl --disable --fail-with-body --location \
+    /usr/bin/curl --disable --fail --location \
         --proto '=https' --proto-redir '=https' --tlsv1.2 \
-        --retry 3 --retry-all-errors --max-filesize 1073741824 \
+        --continue-at - --retry 3 --retry-all-errors --retry-delay 2 \
+        --connect-timeout 30 --speed-limit 1024 --speed-time 120 \
+        --max-filesize 1073741824 --show-error --silent \
         --output "$downloaded_artifact" \
         "https://github.com/vvisionnn/swift-ffmpeg/releases/download/$tag/$ARTIFACT_NAME"
 fi
