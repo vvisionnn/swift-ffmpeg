@@ -120,16 +120,23 @@ case "$work_root" in
         ;;
 esac
 cleanup() {
+    local status=$?
+    trap - EXIT HUP INT TERM
     case "$work_root" in
         /tmp/swift-ffmpeg-remote-release.*|/private/tmp/swift-ffmpeg-remote-release.*)
-            /bin/rm -rf "$work_root"
+            /bin/rm -rf "$work_root" || status=1
             ;;
         *)
             echo "Refusing to clean unsafe verification root: $work_root" >&2
+            status=1
             ;;
     esac
+    exit "$status"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 git_clean() {
     GIT_CONFIG_NOSYSTEM=1 \
@@ -315,7 +322,6 @@ fi
 
 dependency_url="$REPOSITORY_URL"
 dependency_revision="$inspected_revision"
-local_binary_environment=()
 if [[ -n "$fixture_root" ]]; then
     if ! /usr/bin/grep -Fq 'SWIFT_FFMPEG_USE_LOCAL_XCFRAMEWORK' "$tagged_manifest"; then
         echo "Fixture package does not expose the local-XCFramework test switch" >&2
@@ -342,7 +348,6 @@ if [[ -n "$fixture_root" ]]; then
     git_clean -C "$fixture_package" tag --force "$tag"
     dependency_revision="$(git_clean -C "$fixture_package" rev-parse HEAD)"
     dependency_url="file://$fixture_package"
-    local_binary_environment=(SWIFT_FFMPEG_USE_LOCAL_XCFRAMEWORK=1)
 fi
 
 consumer="$work_root/RemoteReleaseConsumer"
@@ -439,8 +444,10 @@ fi
 consumer_env=(
     HOME="$work_root/home"
     CLANG_MODULE_CACHE_PATH="$work_root/module-cache"
-    "${local_binary_environment[@]}"
 )
+if [[ -n "$fixture_root" ]]; then
+    consumer_env+=(SWIFT_FFMPEG_USE_LOCAL_XCFRAMEWORK=1)
+fi
 swift_scratch="$work_root/swift-build"
 /usr/bin/env -u SWIFTPM_MIRROR_CONFIG "${consumer_env[@]}" \
     swift package --package-path "$consumer" --scratch-path "$swift_scratch" resolve

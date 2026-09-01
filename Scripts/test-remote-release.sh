@@ -37,16 +37,23 @@ case "$fixture_root" in
         ;;
 esac
 cleanup() {
+    local status=$?
+    trap - EXIT HUP INT TERM
     case "$fixture_root" in
         /tmp/swift-ffmpeg-remote-fixture.*|/private/tmp/swift-ffmpeg-remote-fixture.*)
-            /bin/rm -rf "$fixture_root"
+            /bin/rm -rf "$fixture_root" || status=1
             ;;
         *)
             echo "Refusing to clean unsafe fixture root: $fixture_root" >&2
+            status=1
             ;;
     esac
+    exit "$status"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 release_zip="$PROJECT_ROOT/.artifacts/release/FFmpeg.xcframework.zip"
 [[ -f "$release_zip" && ! -L "$release_zip" ]] || {
@@ -96,6 +103,19 @@ verification_arguments=(
     --expected-checksum "$checksum"
     --fixture-root "$fixture_root"
 )
+wrong_checksum="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+if [[ "$wrong_checksum" == "$checksum" ]]; then
+    wrong_checksum="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+fi
+if "$SCRIPT_DIR/verify-remote-release.sh" \
+    --tag "$package_version" \
+    --expected-checksum "$wrong_checksum" \
+    --fixture-root "$fixture_root" \
+    --validation-only >/dev/null 2>&1
+then
+    echo "Remote verifier masked an expected checksum failure" >&2
+    exit 1
+fi
 if ((run_full_fixture == 0)); then
     verification_arguments+=(--validation-only)
 fi
