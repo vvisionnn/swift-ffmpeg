@@ -194,7 +194,9 @@ class ReleaseCandidateGenerationTests(unittest.TestCase):
         self.assertEqual(candidate["ffmpeg"]["version"], "9.0.1")
         self.assertEqual(candidate["ffmpeg"]["sha256"], NEW_SOURCE_SHA)
         self.assertEqual(candidate["dav1d"], original_config["dav1d"])
-        self.assertEqual(candidate["build"], original_config["build"])
+        self.assertEqual(candidate["build"]["iOSMinimumVersion"], "15.0")
+        self.assertEqual(candidate["build"]["macOSMinimumVersion"], "12.0")
+        self.assertEqual(candidate["build"]["sourceDateEpoch"], 1786492800)
         self.assertEqual(candidate["toolchain"], original_config["toolchain"])
         hashes = [
             candidate["artifact"]["swiftPackageChecksum"],

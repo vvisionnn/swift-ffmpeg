@@ -339,7 +339,9 @@ def validate_release_config(
     return package_version, ffmpeg_version
 
 
-def validate_discovery(document: Any, configured_version: str) -> dict[str, str]:
+def validate_discovery(
+    document: Any, configured_version: str
+) -> dict[str, str | int]:
     discovery = _mapping(document, "discovery")
     _exact_keys(
         discovery,
@@ -373,13 +375,21 @@ def validate_discovery(document: Any, configured_version: str) -> dict[str, str]
     if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", date) is None:
         raise CandidateError("discovery.release.releaseDate is not ISO YYYY-MM-DD")
     try:
-        _datetime.date.fromisoformat(date)
+        release_date = _datetime.date.fromisoformat(date)
     except ValueError as error:
         raise CandidateError("discovery.release.releaseDate is invalid") from error
+    release_epoch = int(
+        _datetime.datetime.combine(
+            release_date,
+            _datetime.time.min,
+            tzinfo=_datetime.timezone.utc,
+        ).timestamp()
+    )
     return {
         "version": version,
         "sourceURL": expected_url,
         "signatureURL": f"{expected_url}.asc",
+        "sourceDateEpoch": release_epoch,
     }
 
 
@@ -444,6 +454,7 @@ def generate_candidate_documents(
     candidate["ffmpeg"]["url"] = release["sourceURL"]
     candidate["ffmpeg"]["signatureURL"] = release["signatureURL"]
     candidate["ffmpeg"]["sha256"] = source_sha
+    candidate["build"]["sourceDateEpoch"] = release["sourceDateEpoch"]
     candidate["artifact"]["swiftPackageChecksum"] = PLACEHOLDER_SHA256
     candidate["artifact"]["xcframework"]["infoPlistSHA256"] = PLACEHOLDER_SHA256
     for name in SLICE_ARCHIVES:
