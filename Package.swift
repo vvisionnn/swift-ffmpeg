@@ -10,8 +10,8 @@ let ffmpegBinaryTarget: Target =
         )
         : .binaryTarget(
             name: "FFmpeg",
-            url: "https://github.com/vvisionnn/swift-ffmpeg/releases/download/1.0.0/FFmpeg.xcframework.zip",
-            checksum: "02a8f3f7a746fba95b1242cd6350ac6a3e1f3f128e1a2495c9c82328d12e9b66"
+            url: "https://github.com/vvisionnn/swift-ffmpeg/releases/download/1.0.1/FFmpeg.xcframework.zip",
+            checksum: "fb95f1a6e57d0753c083430521a78ddb00913e1cc33b9f8da0cc70579792de63"
         )
 
 let package = Package(

@@ -1,20 +1,20 @@
 {
   "artifact": {
     "name": "FFmpeg.xcframework.zip",
-    "swiftPackageChecksum": "02a8f3f7a746fba95b1242cd6350ac6a3e1f3f128e1a2495c9c82328d12e9b66",
+    "swiftPackageChecksum": "fb95f1a6e57d0753c083430521a78ddb00913e1cc33b9f8da0cc70579792de63",
     "xcframework": {
       "infoPlistSHA256": "699137b8f423e48da9f5628570ce0927c6d84d68cfd8b8bed13a1f42b27a54db",
       "slices": {
-        "ios-arm64": "85edc67f5a147b0c8671cd13ff87d28e6dc68bb5de807cf0fdc96f43f7f192ba",
-        "ios-arm64_x86_64-simulator": "84cb9a1434cecf0af2b4e3dbf0c2320d8565fc10d294e2944682fb2b2a2f6f16",
-        "macos-arm64_x86_64": "277b50f5d7dc92b5b0590ddabf6b30717e4607e2c6342bcea92e4af00c537fd7"
+        "ios-arm64": "0ab6c99b06750c9cdee7bdd8336edbc3337f1056af47ea5b53b4c1c69de37f58",
+        "ios-arm64_x86_64-simulator": "04854abfde72a12ab1442364ed6da89d59990bdcb4e35f068441c7236e0b67b6",
+        "macos-arm64_x86_64": "14c2831b4193f6e3bb77d5449fad4571a796fb58433fa8cac896588a6a43fee9"
       }
     }
   },
   "build": {
     "iOSMinimumVersion": "15.0",
     "macOSMinimumVersion": "12.0",
-    "sourceDateEpoch": 1785824040
+    "sourceDateEpoch": 1786492800
   },
   "dav1d": {
     "sha256": "2abfb0c89212e6e4733a54e0ae509ec00a5b845a6360946f918806e14aedb011",
@@ -24,12 +24,12 @@
   "ffmpeg": {
     "releaseKeyFingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8",
     "releaseKeySHA256": "397b3becedcd5a98769967ff1ff8501ddc89f8368b8f766e4701377d7dbaabe5",
-    "sha256": "7f607a00dd0d28a729d5a4811205812eef01cf6ef6155025febb6f36a9062d52",
-    "signatureURL": "https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz.asc",
-    "url": "https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz",
-    "version": "9.0"
+    "sha256": "cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635",
+    "signatureURL": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz.asc",
+    "url": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz",
+    "version": "9.0.1"
   },
-  "packageVersion": "1.0.0",
+  "packageVersion": "1.0.1",
   "schemaVersion": 1,
   "toolchain": {
     "cctoolsVersion": "Apple Inc. version cctools-1024.3",
