@@ -467,6 +467,7 @@ jobs:
     outputs:
       candidate_branch: ${{ steps.commit.outputs.candidate_branch }}
       candidate_commit: ${{ steps.commit.outputs.candidate_commit }}
+      release_id: ${{ steps.draft.outputs.release_id }}
       release_url: ${{ steps.release.outputs.release_url }}
       tag: ${{ steps.commit.outputs.tag }}
 
@@ -723,6 +724,7 @@ jobs:
           } >>"$GITHUB_OUTPUT"
 
       - name: Create a draft with six explicit release assets
+        id: draft
         env:
           CANDIDATE_COMMIT: ${{ steps.commit.outputs.candidate_commit }}
           FFMPEG_VERSION: ${{ needs.build.outputs.ffmpeg_version }}
@@ -746,19 +748,83 @@ jobs:
 
           source_kit="$PAYLOAD_ROOT/swift-ffmpeg-${PACKAGE_VERSION}-source-kit.zip"
           sbom="$PAYLOAD_ROOT/swift-ffmpeg-${PACKAGE_VERSION}.spdx.json"
-          gh release create "$PACKAGE_VERSION" \
-            "$PAYLOAD_ROOT/FFmpeg.xcframework.zip" \
-            "$PAYLOAD_ROOT/SHA256SUMS" \
-            "$PAYLOAD_ROOT/release-manifest.json" \
-            "$PAYLOAD_ROOT/release-metrics.json" \
-            "$source_kit" \
-            "$sbom" \
-            --draft \
-            --latest=false \
-            --notes-file "$notes" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$CANDIDATE_COMMIT" \
-            --title "swift-ffmpeg $PACKAGE_VERSION"
+          create_payload="$RUNNER_TEMP/create-release.json"
+          draft_json="$RUNNER_TEMP/created-draft-release.json"
+          jq -n \
+            --arg body "$(<"$notes")" \
+            --arg name "swift-ffmpeg $PACKAGE_VERSION" \
+            --arg tag "$PACKAGE_VERSION" \
+            --arg target "$CANDIDATE_COMMIT" \
+            '{
+              tag_name: $tag,
+              target_commitish: $target,
+              name: $name,
+              body: $body,
+              draft: true,
+              prerelease: false,
+              make_latest: "false"
+            }' >"$create_payload"
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/releases" \
+            --input "$create_payload" >"$draft_json"
+
+          release_id="$(jq -er \
+            --arg tag "$PACKAGE_VERSION" \
+            --arg target "$CANDIDATE_COMMIT" \
+            'select(
+              (.id | type == "number" and . > 0) and
+              .tag_name == $tag and
+              .target_commitish == $target and
+              .draft == true and
+              .prerelease == false and
+              .immutable == false and
+              (.assets | type == "array" and length == 0)
+            ) | .id' "$draft_json")"
+          upload_endpoint="$(jq -er \
+            --arg id "$release_id" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            'select(
+              .upload_url == (
+                "https://uploads.github.com/repos/" + $repository +
+                "/releases/" + $id + "/assets{?name,label}"
+              )
+            ) | .upload_url | sub("\\{\\?name,label\\}$"; "")' \
+            "$draft_json")"
+          printf 'release_id=%s\n' "$release_id" >>"$GITHUB_OUTPUT"
+
+          assets=(
+            "$PAYLOAD_ROOT/FFmpeg.xcframework.zip"
+            "$PAYLOAD_ROOT/SHA256SUMS"
+            "$PAYLOAD_ROOT/release-manifest.json"
+            "$PAYLOAD_ROOT/release-metrics.json"
+            "$source_kit"
+            "$sbom"
+          )
+          for asset_path in "${assets[@]}"; do
+            asset_name="$(basename "$asset_path")"
+            [[ "$asset_name" =~ ^[A-Za-z0-9._-]+$ ]]
+            upload_json="$RUNNER_TEMP/upload-${asset_name}.json"
+            curl --disable \
+              --fail-with-body \
+              --location \
+              --proto '=https' \
+              --proto-redir '=https' \
+              --show-error \
+              --silent \
+              --tlsv1.2 \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'Content-Type: application/octet-stream' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              --data-binary "@$asset_path" \
+              --output "$upload_json" \
+              "$upload_endpoint?name=$asset_name"
+            jq -e \
+              --arg name "$asset_name" \
+              --argjson size "$(stat --format='%s' "$asset_path")" \
+              '.name == $name and .size == $size and .state == "uploaded"' \
+              "$upload_json" >/dev/null
+          done
 
       - name: Verify the exact draft assets
         env:
@@ -766,40 +832,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
           PAYLOAD_ROOT: ${{ runner.temp }}/swift-ffmpeg/publish-input
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         shell: bash --noprofile --norc -euo pipefail {0}
         run: |
           release_json="$RUNNER_TEMP/draft-release.json"
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$PACKAGE_VERSION" >"$release_json"
-          python3 -I -B - "$release_json" "$PAYLOAD_ROOT/payload-manifest.json" \
-            "$PACKAGE_VERSION" "$CANDIDATE_COMMIT" <<'PY'
-          import json
-          from pathlib import Path
-          import sys
-
-          release = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-          payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-          if release.get("tag_name") != sys.argv[3] or release.get("target_commitish") != sys.argv[4]:
-              raise SystemExit("draft release target mismatch")
-          if release.get("draft") is not True or release.get("prerelease") is not False:
-              raise SystemExit("release was not created as a stable draft")
-          expected = {record["name"]: record for record in payload["releaseAssets"]}
-          observed = {}
-          for asset in release.get("assets", []):
-              name = asset.get("name")
-              if name in observed:
-                  raise SystemExit("draft contains duplicate assets")
-              observed[name] = asset
-          if set(observed) != set(expected):
-              raise SystemExit("draft release asset set mismatch")
-          for name, record in expected.items():
-              asset = observed[name]
-              if asset.get("size") != record["size"]:
-                  raise SystemExit(f"draft release asset size mismatch: {name}")
-              if asset.get("digest") != f"sha256:{record['sha256']}":
-                  raise SystemExit(f"draft release asset digest mismatch: {name}")
-          PY
-          test "$(git ls-remote origin "refs/tags/$PACKAGE_VERSION" | awk '{print $1}')" = \
-            "$CANDIDATE_COMMIT"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >"$release_json"
+          jq -e \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$PACKAGE_VERSION" \
+            --argjson releaseID "$RELEASE_ID" \
+            --slurpfile payload "$PAYLOAD_ROOT/payload-manifest.json" \
+            '
+              ($payload[0].releaseAssets |
+                map({name, size, digest: ("sha256:" + .sha256)}) |
+                sort_by(.name)) as $expected |
+              .id == $releaseID and
+              .tag_name == $tag and
+              .target_commitish == $commit and
+              .draft == true and
+              .prerelease == false and
+              .immutable == false and
+              (.assets | length) == ($expected | length) and
+              ([.assets[] |
+                select(.state == "uploaded") |
+                {name, size, digest}] | sort_by(.name)) == $expected
+            ' "$release_json" >/dev/null
+          tag_status=0
+          git ls-remote --exit-code --tags origin "refs/tags/$PACKAGE_VERSION" >/dev/null || tag_status=$?
+          test "$tag_status" = "2"
 
       - name: Attest all release assets
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -815,26 +875,126 @@ jobs:
       - name: Publish and require immutability
         id: release
         env:
+          CANDIDATE_COMMIT: ${{ steps.commit.outputs.candidate_commit }}
           GH_TOKEN: ${{ github.token }}
           PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+          PAYLOAD_ROOT: ${{ runner.temp }}/swift-ffmpeg/publish-input
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         shell: bash --noprofile --norc -euo pipefail {0}
         run: |
-          gh release edit "$PACKAGE_VERSION" \
-            --draft=false \
-            --latest \
-            --repo "$GITHUB_REPOSITORY"
+          draft_json="$RUNNER_TEMP/prepublication-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >"$draft_json"
+          jq -e \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$PACKAGE_VERSION" \
+            --argjson releaseID "$RELEASE_ID" \
+            --slurpfile payload "$PAYLOAD_ROOT/payload-manifest.json" \
+            '
+              ($payload[0].releaseAssets |
+                map({name, size, digest: ("sha256:" + .sha256)}) |
+                sort_by(.name)) as $expected |
+              .id == $releaseID and
+              .tag_name == $tag and
+              .target_commitish == $commit and
+              .draft == true and
+              .prerelease == false and
+              .immutable == false and
+              (.assets | length) == ($expected | length) and
+              ([.assets[] |
+                select(.state == "uploaded") |
+                {name, size, digest}] | sort_by(.name)) == $expected
+            ' "$draft_json" >/dev/null
+          tag_status=0
+          git ls-remote --exit-code --tags origin "refs/tags/$PACKAGE_VERSION" >/dev/null || tag_status=$?
+          test "$tag_status" = "2"
+
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false \
+            -f make_latest=true >/dev/null
           release_json="$RUNNER_TEMP/published-release.json"
           immutable="false"
           for _ in 1 2 3 4 5; do
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$PACKAGE_VERSION" >"$release_json"
+            gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >"$release_json"
             immutable="$(jq -r '.immutable // false' "$release_json")"
             [[ "$immutable" == "true" ]] && break
             sleep 3
           done
           test "$immutable" = "true"
-          jq -e '.draft == false and .prerelease == false' "$release_json" >/dev/null
+          jq -e \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$PACKAGE_VERSION" \
+            --argjson releaseID "$RELEASE_ID" \
+            --slurpfile payload "$PAYLOAD_ROOT/payload-manifest.json" \
+            '
+              ($payload[0].releaseAssets |
+                map({name, size, digest: ("sha256:" + .sha256)}) |
+                sort_by(.name)) as $expected |
+              .id == $releaseID and
+              .tag_name == $tag and
+              .target_commitish == $commit and
+              .draft == false and
+              .prerelease == false and
+              .immutable == true and
+              (.assets | length) == ($expected | length) and
+              ([.assets[] |
+                select(.state == "uploaded") |
+                {name, size, digest}] | sort_by(.name)) == $expected
+            ' "$release_json" >/dev/null
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$PACKAGE_VERSION" --jq '.object.sha')" = \
+            "$CANDIDATE_COMMIT"
           release_url="$(jq -er '.html_url' "$release_json")"
           printf 'release_url=%s\n' "$release_url" >>"$GITHUB_OUTPUT"
+
+      - name: Remove an unpublished draft after failure
+        if: ${{ failure() }}
+        env:
+          CANDIDATE_BRANCH: ${{ steps.commit.outputs.candidate_branch }}
+          CANDIDATE_COMMIT: ${{ steps.commit.outputs.candidate_commit }}
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          draft_record="$RUNNER_TEMP/created-draft-release.json"
+          if [[ ! -f "$draft_record" || -L "$draft_record" ]]; then
+            echo "No exact draft record was created; no release cleanup is required."
+            exit 0
+          fi
+          release_id="$(jq -er \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$PACKAGE_VERSION" \
+            'select(
+              (.id | type == "number" and . > 0) and
+              .tag_name == $tag and
+              .target_commitish == $commit and
+              .draft == true and
+              .immutable == false
+            ) | .id' "$draft_record")"
+          release_json="$RUNNER_TEMP/failed-draft-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" >"$release_json"
+          if ! jq -e \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$PACKAGE_VERSION" \
+            --argjson releaseID "$release_id" \
+            '
+              .id == $releaseID and
+              .tag_name == $tag and
+              .target_commitish == $commit and
+              .draft == true and
+              .immutable == false
+            ' "$release_json" >/dev/null; then
+            echo "The exact release is no longer an unpublished draft; preserving it and its candidate branch."
+            exit 0
+          fi
+          gh api --method DELETE \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id"
+
+          test "$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/heads/$CANDIDATE_BRANCH" \
+            --jq '.object.sha')" = "$CANDIDATE_COMMIT"
+          gh api --method DELETE \
+            "repos/$GITHUB_REPOSITORY/git/refs/heads/$CANDIDATE_BRANCH"
+          echo "Removed the exact unpublished draft and candidate branch after failure."
 
   remote-smoke:
     name: Verify public release consumers
@@ -892,6 +1052,7 @@ jobs:
           CANDIDATE_COMMIT: ${{ needs.publish.outputs.candidate_commit }}
           GH_TOKEN: ${{ github.token }}
           PACKAGE_VERSION: ${{ needs.publish.outputs.tag }}
+          RELEASE_ID: ${{ needs.publish.outputs.release_id }}
         shell: bash --noprofile --norc -euo pipefail {0}
         run: |
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = \
@@ -902,7 +1063,8 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/$PACKAGE_VERSION" >"$release_json"
           jq -e \
             --arg target "$CANDIDATE_COMMIT" \
-            '.draft == false and .prerelease == false and .immutable == true and .target_commitish == $target' \
+            --argjson releaseID "$RELEASE_ID" \
+            '.id == $releaseID and .draft == false and .prerelease == false and .immutable == true and .target_commitish == $target' \
             "$release_json" >/dev/null
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$PACKAGE_VERSION" --jq '.object.sha')" = \
             "$CANDIDATE_COMMIT"
