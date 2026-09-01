@@ -1,0 +1,228 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    name: Build and qualify FFmpeg
+    runs-on: macos-15
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      FFMPEG_BUILD_JOBS: "8"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      MISE_LOCKED: "1"
+      MISE_YES: "1"
+
+    steps:
+      - name: Check out the reviewed source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+          show-progress: false
+          submodules: false
+
+      - name: Select the exact Apple toolchain
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          test -d "$DEVELOPER_DIR"
+          test "$(xcodebuild -version)" = $'Xcode 16.4\nBuild version 16F6'
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "18.5"
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "18.5"
+          test "$(xcrun --sdk macosx --show-sdk-version)" = "15.5"
+
+      - name: Provision signature and pkg-config tools
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          gnupg_version="2.5.22"
+          installed_gnupg="$(brew list --versions gnupg 2>/dev/null || true)"
+          if [[ "$installed_gnupg" != "gnupg ${gnupg_version}" ]]; then
+            if [[ -n "$installed_gnupg" ]]; then
+              brew upgrade gnupg
+            else
+              brew install gnupg
+            fi
+          fi
+          test "$(brew list --versions gnupg)" = "gnupg ${gnupg_version}"
+
+          pkgconf_version="3.0.5"
+          pkgconf_sha256="3acd3a8a3cce65a8d620321855d92fb602e026cbe8e13ee36bdec58483b59ace"
+          pkgconf_archive="$RUNNER_TEMP/pkgconf-${pkgconf_version}.tar.xz"
+          pkgconf_source="$RUNNER_TEMP/pkgconf-${pkgconf_version}"
+          pkgconf_prefix="$RUNNER_TEMP/pkgconf-${pkgconf_version}-prefix"
+
+          curl \
+            --fail \
+            --location \
+            --proto '=https' \
+            --proto-redir '=https' \
+            --retry 3 \
+            --retry-all-errors \
+            --show-error \
+            --silent \
+            --output "$pkgconf_archive" \
+            "https://distfiles.ariadne.space/pkgconf/pkgconf-${pkgconf_version}.tar.xz"
+          test "$(shasum -a 256 "$pkgconf_archive" | awk '{print $1}')" = "$pkgconf_sha256"
+          tar -xf "$pkgconf_archive" -C "$RUNNER_TEMP"
+          test -d "$pkgconf_source"
+          (
+            cd "$pkgconf_source"
+            ./configure \
+              --disable-dependency-tracking \
+              --disable-silent-rules \
+              --prefix="$pkgconf_prefix"
+            make -j2
+            make install
+          )
+          test "$("$pkgconf_prefix/bin/pkg-config" --version)" = "$pkgconf_version"
+          printf '%s\n' "$pkgconf_prefix/bin" >>"$GITHUB_PATH"
+          gpg_output="$(gpg --version)"
+          test "${gpg_output%%$'\n'*}" = "gpg (GnuPG) ${gnupg_version}"
+
+      - name: Install mise
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          cache: false
+          install: false
+          version: 2026.8.16
+
+      - name: Install locked developer tools
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise install --locked
+          mise ls --current
+
+      - name: Validate repository and pinned toolchain
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run lint
+          mise run doctor
+          mise run test:discovery
+
+      - name: Authenticate canonical source archives
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run sources:fetch
+          mise run sources:verify
+
+      - name: Build all five XCFramework slices
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: mise run build
+
+      - name: Validate artifact metadata and capability oracle
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run artifact:verify
+          ./Scripts/test-capabilities.sh
+
+      - name: Package deterministically
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run package
+          mise run reproducibility:package
+
+      - name: Test package and macOS consumer
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: mise run test:local
+
+      - name: Build for generic iOS device and test on Simulator
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: mise run test:simulator
+
+      - name: Qualify release and compliance assets
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          mise run test:release-assets
+          mise run release:verify
+
+      - name: Collect explicit qualification evidence
+        if: always()
+        shell: bash --noprofile --norc -euo pipefail {0}
+        run: |
+          evidence_root="$RUNNER_TEMP/swift-ffmpeg-ci-evidence"
+          mkdir -p "$evidence_root"
+          {
+            printf 'commit=%s\n' "$GITHUB_SHA"
+            printf 'job-status=%s\n' "${{ job.status }}"
+            printf 'runner=%s\n' "$RUNNER_OS/$RUNNER_ARCH"
+            xcodebuild -version
+            printf 'iphoneos-sdk=%s\n' "$(xcrun --sdk iphoneos --show-sdk-version)"
+            printf 'iphonesimulator-sdk=%s\n' "$(xcrun --sdk iphonesimulator --show-sdk-version)"
+            printf 'macosx-sdk=%s\n' "$(xcrun --sdk macosx --show-sdk-version)"
+            if command -v mise >/dev/null 2>&1; then
+              mise --version
+            else
+              printf 'mise=unavailable\n'
+            fi
+            if command -v gpg >/dev/null 2>&1; then
+              gpg_output="$(gpg --version)"
+              printf '%s\n' "${gpg_output%%$'\n'*}"
+            else
+              printf 'gpg=unavailable\n'
+            fi
+            if command -v pkg-config >/dev/null 2>&1; then
+              pkg-config --version
+            else
+              printf 'pkg-config=unavailable\n'
+            fi
+          } >"$evidence_root/toolchain.txt"
+          git status --short >"$evidence_root/git-status.txt"
+
+          sbom_path=""
+          if command -v jq >/dev/null 2>&1; then
+            package_version="$(jq -er '.packageVersion' Configuration/release.json)"
+            sbom_path=".artifacts/release/swift-ffmpeg-${package_version}.spdx.json"
+          fi
+          for evidence_path in \
+            Configuration/capabilities.json \
+            Configuration/release.json \
+            .artifacts/release/SHA256SUMS \
+            .artifacts/release/release-manifest.json \
+            .artifacts/release/release-metrics.json \
+            "$sbom_path" \
+            .artifacts/reproducibility/summary.json \
+            .build/simulator-tests/summary.json \
+            .build/simulator-tests/build-for-testing.log \
+            .build/simulator-tests/device-build-for-testing.log \
+            .build/simulator-tests/test-without-building.log
+          do
+            if [[ -f "$evidence_path" && ! -L "$evidence_path" ]]; then
+              destination="$evidence_root/$evidence_path"
+              mkdir -p "$(dirname "$destination")"
+              cp "$evidence_path" "$destination"
+            fi
+          done
+
+          if [[ "${{ job.status }}" != "success" && -d .build/ffmpeg/logs ]]; then
+            while IFS= read -r build_log; do
+              destination="$evidence_root/$build_log"
+              mkdir -p "$(dirname "$destination")"
+              cp "$build_log" "$destination"
+            done < <(find .build/ffmpeg/logs -type f -name '*.log' -print | LC_ALL=C sort)
+          fi
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/swift-ffmpeg-ci-evidence
+          compression-level: 9
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 14

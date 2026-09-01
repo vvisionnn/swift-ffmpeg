@@ -101,4 +101,3 @@ fi
     }
 
 echo "Release assets are deterministic and unsafe archives are rejected"
-
