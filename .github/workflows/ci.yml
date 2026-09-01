@@ -49,16 +49,11 @@ jobs:
       - name: Provision signature and pkg-config tools
         shell: bash --noprofile --norc -euo pipefail {0}
         run: |
-          gnupg_version="2.5.22"
-          installed_gnupg="$(brew list --versions gnupg 2>/dev/null || true)"
-          if [[ "$installed_gnupg" != "gnupg ${gnupg_version}" ]]; then
-            if [[ -n "$installed_gnupg" ]]; then
-              brew upgrade gnupg
-            else
-              brew install gnupg
-            fi
-          fi
-          test "$(brew list --versions gnupg)" = "gnupg ${gnupg_version}"
+          gpg_output="$(gpg --version)"
+          case "${gpg_output%%$'\n'*}" in
+            "gpg (GnuPG) 2."*) ;;
+            *) exit 1 ;;
+          esac
 
           pkgconf_version="3.0.5"
           pkgconf_sha256="3acd3a8a3cce65a8d620321855d92fb602e026cbe8e13ee36bdec58483b59ace"
@@ -91,8 +86,6 @@ jobs:
           )
           test "$("$pkgconf_prefix/bin/pkg-config" --version)" = "$pkgconf_version"
           printf '%s\n' "$pkgconf_prefix/bin" >>"$GITHUB_PATH"
-          gpg_output="$(gpg --version)"
-          test "${gpg_output%%$'\n'*}" = "gpg (GnuPG) ${gnupg_version}"
 
       - name: Install mise
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
