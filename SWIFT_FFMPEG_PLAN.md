@@ -1,8 +1,8 @@
 # swift-ffmpeg implementation plan
 
-This is the authoritative ledger for extracting the Apple FFmpeg binary from
-SwiftMediaToolbox into a small, independently maintained Swift package. The
-goal is packaging and release automation, not a second playback framework.
+This is the authoritative ledger for creating a small, independently
+maintained Apple FFmpeg package. The goal is packaging and release automation,
+not a playback framework.
 
 ## Mission
 
@@ -24,7 +24,7 @@ changes unexpectedly.
 - release archives, checksums, source/relink kits, provenance, and automation.
 
 It does not own a player, Swift playback API, UI, media policy, custom network
-transport, authentication, LibASS, or SwiftMediaToolbox's C shim. Its sole
+transport, authentication, subtitles, or consumer-specific C shims. Its sole
 library product and Clang module are both named `FFmpeg`.
 
 ## Supported artifact
@@ -71,8 +71,8 @@ slice and an executable qualification gate exist for it.
 
 ### 1. Architecture and baseline
 
-- [x] Confirm the extraction seam is the third-party `FFmpeg` binary target
-  below SwiftMediaToolbox's existing `CFFmpegShim`.
+- [x] Confirm the package boundary is the third-party `FFmpeg` binary target
+  and does not include consumer-specific shims or media APIs.
 - [x] Record the current FFmpeg 9.0/dav1d 1.5.4 artifact as the parity oracle:
   five thin slices, three variants, 515 decoders, 359 demuxers, one `spdif`
   muxer, 33 input protocols, and no private `_SecIdentityCreate` reference.
@@ -94,11 +94,11 @@ slice and an executable qualification gate exist for it.
 
 ### 3. Public repository and bootstrap release
 
-- [ ] Create only `vvisionnn/swift-ffmpeg` as a public GitHub repository and
+- [x] Create only `vvisionnn/swift-ffmpeg` as a public GitHub repository and
   push the locally reviewed history.
-- [ ] Add SHA-pinned, read-only-by-default CI for pushes, pull requests, and
+- [x] Add SHA-pinned, read-only-by-default CI for pushes, pull requests, and
   manual runs.
-- [ ] Bootstrap `1.0.0` as an immutable FFmpeg 9.0 parity release, calculate its
+- [x] Bootstrap `1.0.0` as an immutable FFmpeg 9.0 parity release, calculate its
   SwiftPM checksum, commit the matching remote manifest, and prove a fresh
   remote consumer can import and link `FFmpeg` on macOS and iOS Simulator.
 
@@ -114,13 +114,13 @@ slice and an executable qualification gate exist for it.
   the independently versioned package update, and debug at most five attempts
   until the hosted release and post-publish remote consumer tests pass.
 
-### 5. SwiftMediaToolbox integration
+### 5. Consumer integration
 
-- [ ] Switch SwiftMediaToolbox from its local binary target to an exact
+- [ ] Switch the target consumer from its local binary target to an exact
   `swift-ffmpeg` package/product dependency and generate deterministic lockfiles.
-- [ ] Remove only its externalized FFmpeg/dav1d binary-build inputs while
-  retaining all toolbox sources, LibASS, fixtures, behavior, and public APIs.
-- [ ] Update architecture/release scanners and both repositories' documentation.
+- [ ] Remove only externalized FFmpeg/dav1d binary-build inputs while retaining
+  all consumer sources, subtitles, fixtures, behavior, and public APIs.
+- [ ] Update architecture/release scanners and consumer documentation.
 - [ ] Pass the full package, policy, coverage (at least 95%), platform,
   Simulator, codec/format, Demo, audio/video GUI, and metrics qualification.
 - [ ] Complete both plan ledgers, commit each isolated result, push both repos,
@@ -135,9 +135,9 @@ release never reuses a published version or asset.
 | --- | ---: | --- |
 | Architecture and plan | 1 | PASS: minimal ownership and immutable release model recorded |
 | Local package | 1 | PASS: signed sources, five-slice build, deterministic ZIP, macOS consumer, and iPhone 16 Simulator gates passed |
-| Bootstrap release | 0 | Not started |
+| Bootstrap release | 2 | PASS: immutable `1.0.0`, exact assets, and clean local remote-consumer fixture |
 | Daily upstream release | 0 | Not started |
-| SwiftMediaToolbox integration | 0 | Not started |
+| Consumer integration | 0 | Not started |
 | Final qualification | 0 | Not started |
 
 ## Evidence ledger
