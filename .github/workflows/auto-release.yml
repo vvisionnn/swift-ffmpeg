@@ -768,18 +768,28 @@ jobs:
             "repos/$GITHUB_REPOSITORY/releases" \
             --input "$create_payload" >"$draft_json"
 
-          release_id="$(jq -er \
+          release_id="$(jq -ers '
+            select(length == 1) | .[0] |
+            select(
+              type == "object" and
+              (.id | type == "number" and . > 0 and floor == .)
+            ) | .id
+          ' "$draft_json")"
+          printf 'release_id=%s\n' "$release_id" >>"$GITHUB_OUTPUT"
+
+          jq -e \
             --arg tag "$PACKAGE_VERSION" \
             --arg target "$CANDIDATE_COMMIT" \
+            --argjson releaseID "$release_id" \
             'select(
-              (.id | type == "number" and . > 0) and
+              .id == $releaseID and
               .tag_name == $tag and
               .target_commitish == $target and
               .draft == true and
               .prerelease == false and
               .immutable == false and
               (.assets | type == "array" and length == 0)
-            ) | .id' "$draft_json")"
+            )' "$draft_json" >/dev/null
           upload_endpoint="$(jq -er \
             --arg id "$release_id" \
             --arg repository "$GITHUB_REPOSITORY" \
@@ -790,7 +800,6 @@ jobs:
               )
             ) | .upload_url | sub("\\{\\?name,label\\}$"; "")' \
             "$draft_json")"
-          printf 'release_id=%s\n' "$release_id" >>"$GITHUB_OUTPUT"
 
           assets=(
             "$PAYLOAD_ROOT/FFmpeg.xcframework.zip"
