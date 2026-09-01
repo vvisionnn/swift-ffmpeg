@@ -1,0 +1,25 @@
+{
+  "artifact": {
+    "name": "FFmpeg.xcframework.zip",
+    "swiftPackageChecksum": "2e8023345a02026f6372ed0d12c48b4f838bab3baf7541aabece337e2d00ccbd"
+  },
+  "build": {
+    "iOSMinimumVersion": "15.0",
+    "macOSMinimumVersion": "12.0",
+    "sourceDateEpoch": 1785824040
+  },
+  "dav1d": {
+    "sha256": "2abfb0c89212e6e4733a54e0ae509ec00a5b845a6360946f918806e14aedb011",
+    "url": "https://code.videolan.org/videolan/dav1d/-/archive/1.5.4/dav1d-1.5.4.tar.bz2",
+    "version": "1.5.4"
+  },
+  "ffmpeg": {
+    "releaseKeyFingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8",
+    "sha256": "7f607a00dd0d28a729d5a4811205812eef01cf6ef6155025febb6f36a9062d52",
+    "signatureURL": "https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz.asc",
+    "url": "https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz",
+    "version": "9.0"
+  },
+  "packageVersion": "1.0.0",
+  "schemaVersion": 1
+}
