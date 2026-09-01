@@ -107,6 +107,7 @@ jobs:
           mise run lint
           mise run doctor
           mise run test:discovery
+          mise run test:release-candidate
 
       - name: Authenticate canonical source archives
         shell: bash --noprofile --norc -euo pipefail {0}
@@ -132,7 +133,9 @@ jobs:
 
       - name: Test package and macOS consumer
         shell: bash --noprofile --norc -euo pipefail {0}
-        run: mise run test:local
+        run: |
+          mise run test:local
+          mise run test:remote-release
 
       - name: Build for generic iOS device and test on Simulator
         shell: bash --noprofile --norc -euo pipefail {0}
