@@ -1006,7 +1006,7 @@ jobs:
           echo "Removed the exact unpublished draft and candidate branch after failure."
 
   remote-smoke:
-    name: Verify public release consumers
+    name: Verify release consumers
     needs: [build, publish]
     runs-on: macos-15
     timeout-minutes: 45
@@ -1034,7 +1034,7 @@ jobs:
           test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "18.5"
           test "$(xcrun --sdk macosx --show-sdk-version)" = "15.5"
 
-      - name: Resolve, link, run, and test the public package
+      - name: Resolve, link, run, and test the released package
         env:
           ARTIFACT_CHECKSUM: ${{ needs.build.outputs.artifact_checksum }}
           FFMPEG_VERSION: ${{ needs.build.outputs.ffmpeg_version }}
@@ -1047,7 +1047,7 @@ jobs:
             --expected-checksum "$ARTIFACT_CHECKSUM"
 
   finalize:
-    name: Fast-forward main after public smoke
+    name: Fast-forward main after release smoke
     needs: [build, publish, remote-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -1086,4 +1086,4 @@ jobs:
             "$CANDIDATE_COMMIT"
           gh api --method DELETE \
             "repos/$GITHUB_REPOSITORY/git/refs/heads/$CANDIDATE_BRANCH"
-          echo "Main now tracks swift-ffmpeg $PACKAGE_VERSION after public smoke validation."
+          echo "Main now tracks swift-ffmpeg $PACKAGE_VERSION after release smoke validation."
